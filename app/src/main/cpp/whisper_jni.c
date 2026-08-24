@@ -46,7 +46,9 @@ Java_com_whisperkeyboard_WhisperEngine_nativeInit(
     const char *model_path = (*env)->GetStringUTFChars(env, jModelPath, NULL);
     struct whisper_context *ctx = ensure_context(model_path);
     (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
-    return ctx ? (jlong)(intptr_t)ctx : -1;
+    // NOTE: return status code, NOT the raw pointer -
+    // Android tagged pointers (0xB4...) have the sign bit set and would read as negative
+    return ctx ? 1 : -1;
 }
 
 // ---- Free cached context ----
