@@ -279,11 +279,14 @@ object TranscriptionQueue {
                         try {
                             val failDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes/failed")
                             failDir.mkdirs()
-                            val saved = File(failDir, "failed_${System.currentTimeMillis()}.wav")
-                            job.wavFile.copyTo(saved, overwrite = true)
-                            Log.i(TAG, "Saved failed to ${saved.absolutePath}")
+                            // avoid duplicate copies when a retry fails again - reuse the same file
+                            val saved = if (job.wavFile.name.startsWith("failed_")) job.wavFile
+                                else File(failDir, "failed_${System.currentTimeMillis()}.wav").also { job.wavFile.copyTo(it, overwrite = true) }
+                            AppLog.w(TAG, "saved for retry: ${saved.name}")
                             val retryJob = job.copy(wavFile = saved)
-                            synchronized(failedJobs) { failedJobs.add(retryJob) }
+                            synchronized(failedJobs) {
+                                if (failedJobs.none { it.wavFile.absolutePath == saved.absolutePath }) failedJobs.add(retryJob)
+                            }
                         } catch (ex: Exception) {
                             Log.w(TAG, "Failed to save failed WAV: ${ex.message}")
                             synchronized(failedJobs) { failedJobs.add(job) }

@@ -79,10 +79,12 @@ class QuickSwitchService : Service() {
 
         val btn = Button(this)
         btn.text = "🎤"
-        btn.textSize = 16f
-        btn.setTextColor(0xFFFFFFFF.toInt())
-        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(0xCC00B894.toInt())
-        btn.setPadding(18, 10, 18, 10)
+        btn.textSize = 11f
+        btn.setTextColor(0xFF212121.toInt())
+        btn.backgroundTintList = android.content.res.ColorStateList.valueOf(0xCCE0E0E0.toInt())
+        btn.setPadding(10, 5, 10, 5)
+        btn.minimumWidth = 0
+        btn.minimumHeight = 0
 
         var downX = 0f; var downY = 0f
         var startX = 0f; var startY = 0f
