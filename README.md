@@ -1,4 +1,4 @@
-# Whisper Speech to Text — Offline Android IME + Meeting Recorder
+# Whisper Speech to Text for Android (apk) — Offline Android IME + Meeting Recorder
 
 > **On-device Whisper (tiny / base / small / medium) for Samsung Galaxy S23 FE and any arm64-v8a Android 8.0+ device. No internet after model download. Queue + adaptive progress + lock-screen recording.**
 
