@@ -2,6 +2,18 @@
 
 > **On-device Whisper (tiny / base / small / medium) for Samsung Galaxy S23 FE and any arm64-v8a Android 8.0+ device. No internet after model download. Queue + adaptive progress + lock-screen recording.**
 
+![Release](https://img.shields.io/github/v/release/Jackfood2/WhisperSpeechToText)
+
+## Changelog
+
+### v1.1 (2026-08-24) — Accuracy UX + UI polish
+- **High-contrast UI:** `#212121` on `#FFFFFF` cards with `stroke #E0E0E0`, 13sp+ fonts; spinner selected + dropdown now **black on white** (`spinner_item.xml`, `spinner_dropdown_item.xml`) — no more grey-on-white.
+- **Accuracy UX on keyboard:** `VAD: ON/OFF` (1.3s silence auto-Stop via RMS), `LIVE: ON/OFF` (1.6s preview via `setComposingText`), `BT: ON/OFF` (`VOICE_COMMUNICATION` + SCO), `Caps: AUTO/ON/OFF` + `isNoSpeechText` filter.
+- **Privacy Dashboard & Logs** (`PrivacyDashboardActivity`): per-model adaptive baseline `ratio_*` + `count_*` in `whisper_stats`, stored models, `WhisperNotes/*.txt` count, toggles dump, recent transcript preview; Reset/Copy/Clear.
+- **Save Settings instant:** `Save Settings (updates keyboard instantly)` button + `SharedPreferences.OnSharedPreferenceChangeListener` in IME — change in app reflects on keyboard without reopening.
+- **Adaptive progress fix:** per-model learned `avgRatio` (`transcribeSec/audioSec`) with global fallback, creep 88→98% after expected, `recordStats()` after each job.
+- **Lock-screen:** `ImeRecordService` + `MeetingRecordService` `PARTIAL_WAKE_LOCK` + `microphone` foreground.
+
 ![Android](https://img.shields.io/badge/Android-8.0%2B-brightgreen)
 ![Kotlin](https://img.shields.io/badge/Kotlin-1.9-blue)
 ![Whisper](https://img.shields.io/badge/Whisper.cpp-GGML-purple)
