@@ -163,6 +163,9 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().putLong("last_save", System.currentTimeMillis()).apply()
             Toast.makeText(this, "Settings saved - keyboard updates instantly", Toast.LENGTH_SHORT).show()
         }
+        findViewById<Button>(R.id.btnDonate).setOnClickListener {
+            try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://www.paypal.com/paypalme/jackfood2004"))) } catch (_: Exception) { Toast.makeText(this, "PayPal: jackfood2004@gmail.com", Toast.LENGTH_LONG).show() }
+        }
         findViewById<Button>(R.id.btnPrivacy).setOnClickListener { startActivity(Intent(this, PrivacyDashboardActivity::class.java)) }
         findViewById<Button>(R.id.btnPauseQueue).setOnClickListener {
             val paused = TranscriptionQueue.togglePause()

@@ -2,6 +2,7 @@
 
 > **On-device Whisper (tiny / base / small / medium) for Samsung Galaxy S23 FE and any arm64-v8a Android 8.0+ device. No internet after model download. Queue + adaptive progress + lock-screen recording.**
 
+[![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg?logo=paypal)](https://www.paypal.com/paypalme/jackfood2004) [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub-pink.svg?logo=github)](https://github.com/sponsors/Jackfood2)
 ![Release](https://img.shields.io/github/v/release/Jackfood2/WhisperSpeechToText)
 
 ## Changelog
@@ -117,6 +118,12 @@ Check: `git status` should show only the files above, not `build/` or `whisper.c
 ## Performance Notes (S23 FE)
 
 The device has no per-app model warm-up; first transcription after app launch is ~1 s slower (model load). Keep `small` for best accuracy/battery. Use `tiny`/`base` for instant notes. `medium` needs WiFi download and may OOM if many apps open — close others first.
+
+## Donate
+
+If this saves you time, support offline development — **PayPal: jackfood2004@gmail.com** — [paypal.me/jackfood2004](https://www.paypal.com/paypalme/jackfood2004) — or use GitHub Sponsors ( ♥ Sponsor button on repo). Funds go to S23 FE testing + smaller/faster models.
+
+> PayPal email: `jackfood2004@gmail.com` — also works via `Send money` in the PayPal app.
 
 ## Troubleshooting
 
