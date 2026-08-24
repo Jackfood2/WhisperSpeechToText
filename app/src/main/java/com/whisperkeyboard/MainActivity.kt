@@ -73,6 +73,17 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
         spinnerModel.setSelection(models.indexOf(prefs.getString("model", "small")).coerceAtLeast(0))
         spinnerLang.setSelection(langs.indexOf(prefs.getString("lang", "auto")).coerceAtLeast(0))
+        // preload last-used model immediately on open
+        val lastModel = prefs.getString("model", "small") ?: "small"
+        tvStatus.text = localStatusText(lastModel)
+        Thread {
+            val mf = ModelManager.modelFile(this, lastModel)
+            if (mf.exists() && mf.length() > 1_000_000 && !WhisperEngine.isLoaded(mf.absolutePath)) {
+                runOnUiThread { tvStatus.text = "Loading $lastModel model..." }
+                val ok = WhisperEngine.ensureModel(mf.absolutePath)
+                runOnUiThread { tvStatus.text = if (ok) localStatusText(lastModel) else "Model $lastModel load failed" }
+            }
+        }.start()
         when (prefs.getString("entry_mode", "type")) {
             "txt" -> radioEntryMode.check(R.id.radioEntryTxt)
             "both" -> radioEntryMode.check(R.id.radioEntryBoth)
@@ -95,8 +106,24 @@ class MainActivity : AppCompatActivity() {
 
         spinnerModel.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) {
-                prefs.edit().putString("model", models[pos]).apply()
+                val prev = prefs.getString("model", "small")
+                val m = models[pos]
+                prefs.edit().putString("model", m).apply()
                 refreshModelInfo()
+                if (m != prev) {
+                    // unload old / load new model in background
+                    tvStatus.text = "Loading $m model..."
+                    Thread {
+                        val mf = ModelManager.modelFile(this@MainActivity, m)
+                        if (mf.exists() && mf.length() > 1_000_000) {
+                            val ok = WhisperEngine.ensureModel(mf.absolutePath)
+                            runOnUiThread { tvStatus.text = if (ok) "Ready: ggml-$m.bin" else "Model $m load failed" }
+                        } else {
+                            WhisperEngine.unloadIfIdle()
+                            runOnUiThread { tvStatus.text = localStatusText(m) }
+                        }
+                    }.start()
+                }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
@@ -204,6 +231,8 @@ class MainActivity : AppCompatActivity() {
         TranscriptionQueue.removeListener(pqListener)
         super.onDestroy()
     }
+
+    private fun localStatusText(model: String): String = ModelManager.localStatus(this, model)
 
     private fun refreshModelInfo() {
         val sb = StringBuilder()

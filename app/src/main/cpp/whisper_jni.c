@@ -1,4 +1,4 @@
-#include <jni.h>
+﻿#include <jni.h>
 #include <string.h>
 #include <stdlib.h>
 #include <android/log.h>
@@ -8,25 +8,57 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-// ---- Init context from model file ----
+// ---- Cached model context (loaded once, reused across transcriptions) ----
+static struct whisper_context *g_ctx = NULL;
+static char g_model_path[1024] = {0};
+
+// Caller must serialize access (Kotlin side holds a lock around all native calls)
+static struct whisper_context *ensure_context(const char *model_path)
+{
+    if (g_ctx && strcmp(g_model_path, model_path) == 0) {
+        return g_ctx;
+    }
+    if (g_ctx) {
+        LOGI("Unloading previous model: %s", g_model_path);
+        whisper_free(g_ctx);
+        g_ctx = NULL;
+        g_model_path[0] = '\0';
+    }
+    LOGI("Loading model from: %s", model_path);
+    struct whisper_context_params cparams = whisper_context_default_params();
+    struct whisper_context *ctx = whisper_init_from_file_with_params(model_path, cparams);
+    if (!ctx) {
+        LOGE("Failed to load model");
+        return NULL;
+    }
+    snprintf(g_model_path, sizeof(g_model_path), "%s", model_path);
+    g_ctx = ctx;
+    LOGI("Model loaded and cached");
+    return g_ctx;
+}
+
+// ---- Init / preload context from model file ----
 JNIEXPORT jlong JNICALL
 Java_com_whisperkeyboard_WhisperEngine_nativeInit(
     JNIEnv *env, jobject thiz, jstring jModelPath)
 {
     const char *model_path = (*env)->GetStringUTFChars(env, jModelPath, NULL);
-    LOGI("Loading model from: %s", model_path);
-
-    struct whisper_context_params cparams = whisper_context_default_params();
-    struct whisper_context *ctx = whisper_init_from_file_with_params(model_path, cparams);
-
+    struct whisper_context *ctx = ensure_context(model_path);
     (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
+    return ctx ? (jlong)(intptr_t)ctx : -1;
+}
 
-    if (!ctx) {
-        LOGE("Failed to load model");
-        return -1;
+// ---- Free cached context ----
+JNIEXPORT void JNICALL
+Java_com_whisperkeyboard_WhisperEngine_nativeFree(
+    JNIEnv *env, jobject thiz)
+{
+    if (g_ctx) {
+        LOGI("Freeing cached model");
+        whisper_free(g_ctx);
+        g_ctx = NULL;
+        g_model_path[0] = '\0';
     }
-    LOGI("Model loaded successfully");
-    return (jlong)(intptr_t)ctx;
 }
 
 // ---- Transcribe WAV file ----
@@ -41,9 +73,8 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
 
     LOGI("Transcribe: model=%s wav=%s lang=%s", model_path, wav_path, lang);
 
-    // Init context
-    struct whisper_context_params cparams = whisper_context_default_params();
-    struct whisper_context *ctx = whisper_init_from_file_with_params(model_path, cparams);
+    // Use cached context (reloads only if model path changed)
+    struct whisper_context *ctx = ensure_context(model_path);
 
     if (!ctx) {
         LOGE("Failed to init context");
@@ -58,7 +89,7 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
     FILE *fp = fopen(wav_path, "rb");
     if (!fp) {
         LOGE("Failed to open WAV: %s", wav_path);
-        whisper_free(ctx);
+        // ctx stays cached (freed via nativeFree)
         (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
         (*env)->ReleaseStringUTFChars(env, jWavPath, wav_path);
         (*env)->ReleaseStringUTFChars(env, jLang, lang);
@@ -69,7 +100,7 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
     unsigned char header[44];
     if (fread(header, 1, 44, fp) != 44) {
         fclose(fp);
-        whisper_free(ctx);
+        // ctx stays cached (freed via nativeFree)
         (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
         (*env)->ReleaseStringUTFChars(env, jWavPath, wav_path);
         (*env)->ReleaseStringUTFChars(env, jLang, lang);
@@ -90,7 +121,7 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
     float *audio_data = (float *)malloc(num_samples * sizeof(float));
     if (!audio_data) {
         fclose(fp);
-        whisper_free(ctx);
+        // ctx stays cached (freed via nativeFree)
         (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
         (*env)->ReleaseStringUTFChars(env, jWavPath, wav_path);
         (*env)->ReleaseStringUTFChars(env, jLang, lang);
@@ -175,7 +206,7 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
     if (whisper_full(ctx, params, audio_data, num_samples) != 0) {
         LOGE("whisper_full failed");
         free(audio_data);
-        whisper_free(ctx);
+        // ctx stays cached (freed via nativeFree)
         (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
         (*env)->ReleaseStringUTFChars(env, jWavPath, wav_path);
         (*env)->ReleaseStringUTFChars(env, jLang, lang);
@@ -205,7 +236,7 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
 
     // Cleanup
     free(audio_data);
-    whisper_free(ctx);
+    // ctx stays cached (freed via nativeFree)
     (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
     (*env)->ReleaseStringUTFChars(env, jWavPath, wav_path);
     (*env)->ReleaseStringUTFChars(env, jLang, lang);
@@ -216,3 +247,4 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
     LOGI("Transcription complete: %zu chars", total_len);
     return jresult;
 }
+

@@ -58,6 +58,34 @@ class WhisperKeyboardService : InputMethodService() {
     private val previewExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "live-preview").apply { isDaemon = true } }
     @Volatile private var previewBusy = false
     @Volatile private var lastComposing = ""
+    @Volatile private var liveConsumedBytes = 0L
+
+    override fun onCreate() {
+        super.onCreate()
+        preloadModel("onCreate")
+    }
+
+    private fun preloadModel(from: String) {
+        Thread {
+            try {
+                val mf = ModelManager.modelFile(this, getModel())
+                if (mf.exists() && mf.length() > 1_000_000 && !WhisperEngine.isLoaded(mf.absolutePath)) {
+                    handler.post { updateStatus("Loading ${getModel()} model...") }
+                    val ok = WhisperEngine.ensureModel(mf.absolutePath)
+                    handler.post { updateStatus(if (ok) "${getModel()} ready - tap Speak" else "Model load failed - will retry on Speak") }
+                }
+            } catch (_: Exception) {}
+        }.apply { isDaemon = true; name = "model-preload-$from"; start() }
+    }
+
+    /** Unload model only when idle (not recording, queue empty). Used when interface closes. */
+    private fun maybeUnload(reason: String) {
+        if (isRecording.get()) { Log.i(TAG, "Skip unload ($reason) - recording"); return }
+        if (previewBusy) { Log.i(TAG, "Skip unload ($reason) - live preview"); return }
+        if (TranscriptionQueue.isActive()) { Log.i(TAG, "Skip unload ($reason) - queue busy"); return }
+        WhisperEngine.unloadIfIdle()
+    }
+
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         handler.post { refreshAllButtons(); if (key in listOf("model","lang","entry_mode","vad_on","live_on","bt_mic","caps_mode")) updateStatus("Settings saved: $key") }
     }
@@ -98,6 +126,15 @@ class WhisperKeyboardService : InputMethodService() {
         btnCaps = view.findViewById(R.id.btnCaps)
 
         btnMic?.setOnClickListener { if (!isRecording.get()) startRecording() }
+        // Long-press mic: voice input selection (pick another voice input method)
+        btnMic?.setOnLongClickListener {
+            try {
+                val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                imm.showInputMethodPicker()
+                updateStatus("Pick a voice input method...")
+            } catch (_: Exception) {}
+            true
+        }
         btnStop?.setOnClickListener { if (isRecording.get()) stopRecordingAndTranscribe() }
         btnPause?.setOnClickListener {
             val nowPaused = TranscriptionQueue.togglePause()
@@ -149,7 +186,21 @@ class WhisperKeyboardService : InputMethodService() {
     private fun isBtOn(): Boolean = prefs().getBoolean("bt_mic", false)
     private fun getCapsMode(): String = prefs().getString("caps_mode", "auto") ?: "auto"
 
-    private fun setModel(m: String) { prefs().edit().putString("model", m).apply(); refreshAllButtons(); Toast.makeText(this, "Model: $m", Toast.LENGTH_SHORT).show(); updateStatus("Model: $m - ready") }
+    private fun setModel(m: String) {
+        prefs().edit().putString("model", m).apply()
+        refreshAllButtons()
+        val mf = ModelManager.modelFile(this, m)
+        if (mf.exists() && mf.length() > 1_000_000) {
+            if (WhisperEngine.isLoaded(mf.absolutePath)) {
+                Toast.makeText(this, "Model: $m", Toast.LENGTH_SHORT).show(); updateStatus("$m ready")
+            } else {
+                Toast.makeText(this, "Loading model: $m", Toast.LENGTH_SHORT).show(); updateStatus("Loading $m...")
+                preloadModel("setModel")
+            }
+        } else {
+            Toast.makeText(this, "$m not downloaded", Toast.LENGTH_SHORT).show(); updateStatus("$m not downloaded - open app to download")
+        }
+    }
     private fun setEntryMode(mode: String) { prefs().edit().putString("entry_mode", mode).apply(); refreshAllButtons(); val label = when(mode){"type"->"Type";"txt"->"Save TXT";else->"Both"}; Toast.makeText(this, label, Toast.LENGTH_SHORT).show(); updateStatus("$label - ready") }
     private fun toggleVad() { val v = !isVadOn(); prefs().edit().putBoolean("vad_on", v).apply(); refreshAllButtons(); Toast.makeText(this, if(v) "VAD auto-stop ON" else "VAD OFF", Toast.LENGTH_SHORT).show() }
     private fun toggleLive() { val v = !isLiveOn(); prefs().edit().putBoolean("live_on", v).apply(); refreshAllButtons(); Toast.makeText(this, if(v) "LIVE typing ON" else "LIVE OFF", Toast.LENGTH_SHORT).show() }
@@ -235,6 +286,7 @@ class WhisperKeyboardService : InputMethodService() {
             var hasSpoken = false
             var lastVoiceTime = System.currentTimeMillis()
             var lastPreviewTime = System.currentTimeMillis()
+            var usedLivePreview = false
             val vadThresh = 0.018
             val vadSilenceMs = 1300L
             val liveOn = isLiveOn()
@@ -265,7 +317,10 @@ class WhisperKeyboardService : InputMethodService() {
                             if (liveOn && !previewBusy && now - lastPreviewTime > 1600 && livePcm.size() > 9000) {
                                 lastPreviewTime = now
                                 val snapshot: ByteArray
-                                synchronized(livePcm) { snapshot = livePcm.toByteArray() }
+                                synchronized(livePcm) {
+                                    snapshot = livePcm.toByteArray()
+                                    liveConsumedBytes = snapshot.size.toLong() // bytes already shown via LIVE
+                                }
                                 // skip too short
                                 if (snapshot.size > 9000) {
                                     previewBusy = true
@@ -275,10 +330,11 @@ class WhisperKeyboardService : InputMethodService() {
                                         AudioUtils.pcmBytesToWavFile(snapshot, previewWav)
                                         previewExecutor.submit {
                                             try {
-                                                val mf = ModelManager.modelFile(this, model)
+                                                val mf = ModelManager.modelFile(this@WhisperKeyboardService, model)
                                                 if (mf.exists()) {
                                                     val txt = WhisperEngine.transcribe(mf.absolutePath, previewWav.absolutePath, lang).trim()
-                                                    if (txt.isNotEmpty() && !AudioUtils.isNoSpeechText(txt)) {
+                                                    if (txt.isNotEmpty() && !txt.startsWith("ERROR") && !AudioUtils.isNoSpeechText(txt)) {
+                                                        usedLivePreview = true
                                                         val capped = applyCapsMode(txt)
                                                         lastComposing = capped
                                                         handler.post {
@@ -299,14 +355,55 @@ class WhisperKeyboardService : InputMethodService() {
                 try { recorder.stop() } catch (_: Exception) {}
                 try { recorder.release() } catch (_: Exception) {}
                 activeRecorder = null
-                // clear composing before final commit
+                // wait briefly for any in-flight LIVE preview so tail math is correct
+                var waitMs = 0
+                while (previewBusy && waitMs < 3000) { Thread.sleep(100); waitMs += 100 }
+                // clear composing before final commit (finalizes LIVE text into the field)
                 handler.post { try { currentInputConnection?.finishComposingText() } catch (_: Exception) {} }
 
+                // decide what still needs transcription:
+                // - LIVE shown text -> only the outstanding tail since the last preview chunk
+                // - otherwise -> full recording
+                val useTail = liveOn && usedLivePreview && lastComposing.isNotEmpty() && liveConsumedBytes > 0
+                var wavFile: File? = null
                 if (pcmFile != null && pcmFile.exists() && pcmFile.length() > 1800) {
-                    val wavFile = File(cacheDir, "ime_rec_${System.currentTimeMillis()}.wav")
-                    AudioUtils.pcmToWav(pcmFile, wavFile)
-                    pcmFile.delete()
+                    if (useTail) {
+                        val total = pcmFile!!.length()
+                        val tailLen = total - liveConsumedBytes
+                        if (tailLen > 16000) { // > ~0.5s of speech worth transcribing
+                            val ts = System.currentTimeMillis()
+                            val tailPcm = File(cacheDir, "ime_tail_$ts.pcm")
+                            java.io.RandomAccessFile(pcmFile!!, "r").use { raf ->
+                                raf.seek(liveConsumedBytes)
+                                val buf = ByteArray(8192)
+                                var remaining = tailLen
+                                FileOutputStream(tailPcm).use { tOut ->
+                                    while (remaining > 0) {
+                                        val n = raf.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
+                                        if (n < 0) break
+                                        tOut.write(buf, 0, n)
+                                        remaining -= n
+                                    }
+                                }
+                            }
+                            wavFile = File(cacheDir, "ime_tail_$ts.wav")
+                            AudioUtils.pcmToWav(tailPcm, wavFile)
+                            tailPcm.delete()
+                            pcmFile!!.delete()
+                            Log.i(TAG, "LIVE tail mode: total=$total consumed=$liveConsumedBytes tail=$tailLen")
+                        } else {
+                            Log.i(TAG, "LIVE tail too short ($tailLen bytes) - keeping LIVE text only")
+                            pcmFile!!.delete()
+                        }
+                    } else {
+                        wavFile = File(cacheDir, "ime_rec_${System.currentTimeMillis()}.wav")
+                        AudioUtils.pcmToWav(pcmFile!!, wavFile)
+                        pcmFile!!.delete()
+                    }
+                }
+                if (wavFile != null && wavFile.exists() && wavFile.length() > 1800) {
                     val model = getModel(); val lang = getLang(); val entryMode = getEntryMode()
+                    val livePrefix = if (useTail) lastComposing else ""
                     TranscriptionQueue.enqueue(
                         TranscriptionQueue.Job(
                             context = this@WhisperKeyboardService,
@@ -317,18 +414,19 @@ class WhisperKeyboardService : InputMethodService() {
                                 handler.post {
                                     var t = text.trim()
                                     if (AudioUtils.isNoSpeechText(t)) {
-                                        updateStatus("No speech - filtered")
-                                        try { currentInputConnection?.setComposingText("", 1); currentInputConnection?.finishComposingText() } catch (_: Exception) {}
+                                        updateStatus(if (useTail) "Done (LIVE text kept)" else "No speech - filtered")
+                                        if (!useTail) try { currentInputConnection?.setComposingText("", 1); currentInputConnection?.finishComposingText() } catch (_: Exception) {}
                                     } else {
                                         t = applyCapsMode(t)
-                                        // clear live composing first
-                                        try { currentInputConnection?.finishComposingText() } catch (_: Exception) {}
                                         when (entryMode) {
                                             "type" -> currentInputConnection?.commitText(t + " ", 1)
-                                            "txt" -> { saveToTxtFile(t); Toast.makeText(this, "Saved to TXT", Toast.LENGTH_SHORT).show() }
-                                            "both" -> { currentInputConnection?.commitText(t + " ", 1); saveToTxtFile(t) }
+                                            "txt" -> saveToTxtFile((if (livePrefix.isNotEmpty()) "$livePrefix $t" else t))
+                                            "both" -> {
+                                                currentInputConnection?.commitText(t + " ", 1)
+                                                saveToTxtFile((if (livePrefix.isNotEmpty()) "$livePrefix $t" else t))
+                                            }
                                         }
-                                        updateStatus("Done: ${t.take(60)}")
+                                        updateStatus("Done: ${(if (livePrefix.isNotEmpty()) "$livePrefix $t" else t).take(60)}")
                                     }
                                     updateQueueBadge()
                                 }
@@ -345,15 +443,22 @@ class WhisperKeyboardService : InputMethodService() {
                     )
                     handler.post { resetMicButton(); updateStatus("Queued - ready for next. ${TranscriptionQueue.status()}"); updateQueueBadge() }
                 } else {
-                    pcmFile?.delete()
-                    handler.post { try { currentInputConnection?.finishComposingText() } catch (_: Exception) {}; updateStatus("Too short - ready"); resetMicButton() }
+                    wavFile?.delete()
+                    handler.post {
+                        if (usedLivePreview) { resetMicButton(); updateStatus("Done: ${lastComposing.take(60)}") }
+                        else { try { currentInputConnection?.finishComposingText() } catch (_: Exception) {}; updateStatus("Too short - ready"); resetMicButton() }
+                    }
                 }
+                lastComposing = ""
+                liveConsumedBytes = 0
             } catch (e: Exception) {
                 Log.e(TAG, "Recording error: ${e.message}", e)
                 pcmFile?.delete()
                 handler.post { try { currentInputConnection?.finishComposingText() } catch (_: Exception) {}; updateStatus("Error: ${e.message} - ready"); resetMicButton() }
                 try { activeRecorder?.release() } catch (_: Exception) {}
                 activeRecorder = null
+                lastComposing = ""
+                liveConsumedBytes = 0
             } finally {
                 handler.postDelayed({ if (!isRecording.get()) stopImeForeground() }, 1500)
             }
@@ -393,19 +498,31 @@ class WhisperKeyboardService : InputMethodService() {
 
     override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        // interface shown -> make sure the selected model is loaded (fast no-op if cached)
+        preloadModel("onStartInputView")
         refreshAllButtons()
         progressBar?.progress = TranscriptionQueue.progress()
         tvPct?.text = "${TranscriptionQueue.progress()}%"
         updateQueueBadge()
     }
 
+    override fun onFinishInputView(finishingInput: Boolean) {
+        super.onFinishInputView(finishingInput)
+        if (finishingInput) {
+            // interface switched away/closed -> unload when idle (recording/queue keep it alive)
+            handler.postDelayed({ maybeUnload("inputFinished") }, 1500)
+        }
+    }
+
     override fun onDestroy() {
         TranscriptionQueue.removeListener(pqListener)
         try { prefs().unregisterOnSharedPreferenceChangeListener(prefsListener) } catch (_: Exception) {}
+        handler.removeCallbacksAndMessages(null)
         isRecording.set(false)
         try { activeRecorder?.stop() } catch (_: Exception) {}
         try { activeRecorder?.release() } catch (_: Exception) {}
         stopImeForeground()
+        maybeUnload("onDestroy")
         super.onDestroy()
     }
 }

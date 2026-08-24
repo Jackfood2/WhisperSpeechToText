@@ -160,6 +160,8 @@ object TranscriptionQueue {
 
     fun progress(): Int = currentPct
     fun isPaused(): Boolean = paused.get()
+    /** True when nothing is being transcribed and nothing is pending. */
+    fun isActive(): Boolean = isProcessing || pendingCount.get() > 0
 
     fun enqueue(job: Job) {
         pendingCount.incrementAndGet()
@@ -200,49 +202,77 @@ object TranscriptionQueue {
         executor.submit {
             Log.i(TAG, "Worker started")
             while (true) {
-                if (paused.get()) { Log.i(TAG, "Worker pausing"); isProcessing = false; stopSimulatedProgress(); notifyProgress(0); break }
-                val job = try { queue.poll(500, TimeUnit.MILLISECONDS) } catch (e: InterruptedException) { null }
-                if (job == null) { isProcessing = false; stopSimulatedProgress(); notifyProgress(0); Log.i(TAG, "Worker idle"); break }
-                currentModel = job.model
-                Log.i(TAG, "Processing job: model=${job.model} lang=${job.lang} file=${job.wavFile.name} size=${job.wavFile.length()}")
-                val audioSec = estimateSeconds(job.wavFile)
-                val startMs = System.currentTimeMillis()
-                startSimulatedProgress(job.context, job.model, job.wavFile)
-                var success = false
-                var resultText = ""
-                var errorMsg = ""
                 try {
-                    val modelFile = ModelManager.modelFile(job.context, job.model)
-                    if (!modelFile.exists()) throw IllegalStateException("Model ggml-${job.model}.bin not found. Download it in app first.")
-                    resultText = WhisperEngine.transcribe(modelFile.absolutePath, job.wavFile.absolutePath, job.lang).trim()
-                    Log.i(TAG, "Result: ${resultText.take(120)}")
-                    success = true
-                    val elapsedSec = (System.currentTimeMillis() - startMs) / 1000.0
-                    recordStats(job.context, job.model, audioSec, elapsedSec)
-                    stopSimulatedProgress(); notifyProgress(100)
-                    Thread.sleep(500)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Transcribe failed: ${e.message}", e)
-                    errorMsg = e.message ?: "Unknown error"
-                    stopSimulatedProgress(); notifyProgress(0)
-                    try {
-                        val failDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes/failed")
-                        failDir.mkdirs()
-                        val saved = File(failDir, "failed_${System.currentTimeMillis()}.wav")
-                        job.wavFile.copyTo(saved, overwrite = true)
-                        Log.i(TAG, "Saved failed to ${saved.absolutePath}")
-                        val retryJob = job.copy(wavFile = saved)
-                        synchronized(failedJobs) { failedJobs.add(retryJob) }
-                    } catch (ex: Exception) {
-                        Log.w(TAG, "Failed to save failed WAV: ${ex.message}")
-                        synchronized(failedJobs) { failedJobs.add(job) }
+                    if (paused.get()) { Log.i(TAG, "Worker pausing"); isProcessing = false; stopSimulatedProgress(); notifyProgress(0); break }
+                    val job = try { queue.poll(500, TimeUnit.MILLISECONDS) } catch (e: InterruptedException) { null }
+                    if (job == null) { isProcessing = false; stopSimulatedProgress(); notifyProgress(0); Log.i(TAG, "Worker idle"); break }
+                    currentModel = job.model
+                    Log.i(TAG, "Processing job: model=${job.model} lang=${job.lang} file=${job.wavFile.name} size=${job.wavFile.length()}")
+                    val audioSec = estimateSeconds(job.wavFile)
+                    val startMs = System.currentTimeMillis()
+                    startSimulatedProgress(job.context, job.model, job.wavFile)
+                    var success = false
+                    var resultText = ""
+                    var errorMsg = ""
+                    var attempt = 0
+                    while (attempt < 2 && !success) {
+                        attempt++
+                        try {
+                            val modelFile = ModelManager.modelFile(job.context, job.model)
+                            if (!modelFile.exists() || modelFile.length() < 1_000_000) throw IllegalStateException("Model ggml-${job.model}.bin not found. Download it in app first.")
+                            resultText = WhisperEngine.transcribe(modelFile.absolutePath, job.wavFile.absolutePath, job.lang).trim()
+                            if (resultText.startsWith("ERROR:")) {
+                                // native-level failure: retry once (self-heal reloads model), then fail
+                                if (attempt < 2) { Log.w(TAG, "Attempt $attempt returned ${resultText.take(60)} - retrying"); continue }
+                                throw IllegalStateException(resultText)
+                            }
+                            Log.i(TAG, "Result: ${resultText.take(120)}")
+                            success = true
+                            val elapsedSec = (System.currentTimeMillis() - startMs) / 1000.0
+                            recordStats(job.context, job.model, audioSec, elapsedSec)
+                            stopSimulatedProgress(); notifyProgress(100)
+                            Thread.sleep(500)
+                        } catch (e: Exception) {
+                            if (attempt < 2) { Log.w(TAG, "Attempt $attempt failed: ${e.message} - retrying"); Thread.sleep(300); continue }
+                            Log.e(TAG, "Transcribe failed after $attempt attempts: ${e.message}", e)
+                            errorMsg = e.message ?: "Unknown error"
+                            stopSimulatedProgress(); notifyProgress(0)
+                            break
+                        } catch (e: OutOfMemoryError) {
+                            errorMsg = "Out of memory - try a smaller model"
+                            Log.e(TAG, "OOM: ${e.message}")
+                            stopSimulatedProgress(); notifyProgress(0)
+                            break
+                        }
                     }
-                } finally {
-                    pendingCount.decrementAndGet()
-                    try { if (job.wavFile.exists()) job.wavFile.delete() } catch (_: Exception) {}
+                    if (!success && errorMsg.isEmpty()) errorMsg = "Unknown error"
+                    if (!success) {
+                        try {
+                            val failDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes/failed")
+                            failDir.mkdirs()
+                            val saved = File(failDir, "failed_${System.currentTimeMillis()}.wav")
+                            job.wavFile.copyTo(saved, overwrite = true)
+                            Log.i(TAG, "Saved failed to ${saved.absolutePath}")
+                            val retryJob = job.copy(wavFile = saved)
+                            synchronized(failedJobs) { failedJobs.add(retryJob) }
+                        } catch (ex: Exception) {
+                            Log.w(TAG, "Failed to save failed WAV: ${ex.message}")
+                            synchronized(failedJobs) { failedJobs.add(job) }
+                        }
+                    }
+                    try {
+                        pendingCount.decrementAndGet()
+                        if (success || job.wavFile.absolutePath.contains("cache")) {
+                            try { if (job.wavFile.exists()) job.wavFile.delete() } catch (_: Exception) {}
+                        }
+                    } catch (_: Exception) {}
+                    if (success) job.onResult(resultText) else job.onError(errorMsg)
+                    notifyProgress(0)
+                } catch (t: Throwable) {
+                    // never let the worker thread die
+                    Log.e(TAG, "Worker loop error: ${t.message}", t)
+                    stopSimulatedProgress(); notifyProgress(0)
                 }
-                if (success) job.onResult(resultText) else job.onError(errorMsg)
-                notifyProgress(0)
             }
         }
     }
