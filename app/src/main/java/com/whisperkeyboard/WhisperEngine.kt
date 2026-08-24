@@ -32,6 +32,12 @@ object WhisperEngine {
         if (modelPath.isBlank()) return false
         lock.withLock {
             try {
+                val f = java.io.File(modelPath)
+                if (!f.exists() || f.length() < 1_000_000) {
+                    lastError = "Model file missing"
+                    android.util.Log.e("WhisperEngine", "ensureModel: file missing/incomplete: $modelPath (${if (f.exists()) f.length() else 0} bytes)")
+                    return false
+                }
                 val handle = nativeInit(modelPath)
                 if (handle > 0) {
                     loadedPath = modelPath
@@ -41,7 +47,7 @@ object WhisperEngine {
                 }
                 lastError = "Model load failed"
                 return false
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 lastError = e.message ?: "load error"
                 android.util.Log.e("WhisperEngine", "ensureModel failed: ${e.message}")
                 return false
@@ -65,7 +71,7 @@ object WhisperEngine {
                 loadedPath = null
                 android.util.Log.i("WhisperEngine", "Model unloaded (idle)")
                 true
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 android.util.Log.w("WhisperEngine", "unload failed: ${e.message}")
                 false
             }
@@ -95,7 +101,7 @@ object WhisperEngine {
                     android.util.Log.e("WhisperEngine", "OOM during transcribe - freeing model", e)
                     try { nativeFree(); loadedPath = null } catch (_: Throwable) {}
                     return "ERROR: Out of memory - try a smaller model"
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     lastError = e.message ?: "transcribe error"
                     android.util.Log.e("WhisperEngine", "Transcribe error: ${e.message}")
                     return "ERROR: ${e.message}"

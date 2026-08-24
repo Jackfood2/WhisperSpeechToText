@@ -1,6 +1,7 @@
 ﻿#include <jni.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <android/log.h>
 #include "whisper.h"
 

@@ -68,13 +68,18 @@ class WhisperKeyboardService : InputMethodService() {
     private fun preloadModel(from: String) {
         Thread {
             try {
-                val mf = ModelManager.modelFile(this, getModel())
-                if (mf.exists() && mf.length() > 1_000_000 && !WhisperEngine.isLoaded(mf.absolutePath)) {
-                    handler.post { updateStatus("Loading ${getModel()} model...") }
-                    val ok = WhisperEngine.ensureModel(mf.absolutePath)
-                    handler.post { updateStatus(if (ok) "${getModel()} ready - tap Speak" else "Model load failed - will retry on Speak") }
+                val m = getModel()
+                val mf = ModelManager.modelFile(this, m)
+                if (!mf.exists() || mf.length() < 1_000_000) {
+                    handler.post { updateStatus("$m model not downloaded - open app to download") }
+                    return@Thread
                 }
-            } catch (_: Exception) {}
+                if (!WhisperEngine.isLoaded(mf.absolutePath)) {
+                    handler.post { updateStatus("Loading $m model...") }
+                    val ok = WhisperEngine.ensureModel(mf.absolutePath)
+                    handler.post { updateStatus(if (ok) "$m ready - tap Speak" else "Model load FAILED - open app") }
+                }
+            } catch (_: Throwable) {}
         }.apply { isDaemon = true; name = "model-preload-$from"; start() }
     }
 
@@ -270,6 +275,13 @@ class WhisperKeyboardService : InputMethodService() {
         if (isRecording.get()) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             updateStatus("Need mic permission - open app"); return
+        }
+        val selModel = getModel()
+        val mf = ModelManager.modelFile(this, selModel)
+        if (!mf.exists() || mf.length() < 1_000_000) {
+            updateStatus("$selModel not downloaded - open app, tap Download Model")
+            Toast.makeText(this, "$selModel model missing - open the app to download it", Toast.LENGTH_LONG).show()
+            return
         }
         isRecording.set(true)
         startImeForeground()
