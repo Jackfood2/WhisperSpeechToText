@@ -187,10 +187,14 @@ class WhisperKeyboardService : InputMethodService() {
             } catch (_: Exception) {}
             true
         }
-        // Close (X): hide the keyboard; recording/transcription continue in background
+        // Close (X): switch back to the previous (default) keyboard; processing continues in background
         btnCloseKeyboard?.setOnClickListener {
             Toast.makeText(this, if (isRecording.get() || TranscriptionQueue.isActive()) "Continues in background" else "Closed", Toast.LENGTH_SHORT).show()
-            try { requestHideSelf(0) } catch (_: Exception) {}
+            try {
+                if (!switchToPreviousInputMethod()) requestHideSelf(0)
+            } catch (_: Exception) {
+                try { requestHideSelf(0) } catch (_: Exception) {}
+            }
         }
         // Backspace: tap = delete last word, hold = repeat char deletion
         btnBackspace?.setOnClickListener { deleteLastWord() }
