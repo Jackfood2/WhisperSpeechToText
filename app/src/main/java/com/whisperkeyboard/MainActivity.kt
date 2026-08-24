@@ -148,6 +148,57 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
         }
 
+        // ---- Mic Bubble quick switch ----
+        val swBubble = findViewById<com.google.android.material.switchmaterial.SwitchMaterial>(R.id.switchBubble)
+        val seekAlpha = findViewById<android.widget.SeekBar>(R.id.seekBubbleAlpha)
+        val tvAlpha = findViewById<TextView>(R.id.tvBubbleAlpha)
+
+        fun overlayGranted(): Boolean =
+            android.provider.Settings.canDrawOverlays(this)
+
+        fun setBubble(on: Boolean) {
+            prefs.edit().putBoolean("bubble_on", on).apply()
+            if (on) {
+                if (!overlayGranted()) {
+                    Toast.makeText(this, "Allow 'Display over other apps' first", Toast.LENGTH_LONG).show()
+                    startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
+                    swBubble.isChecked = false
+                    return
+                }
+                startForegroundService(Intent(this, QuickSwitchService::class.java))
+                AppLog.i("Bubble", "enabled")
+            } else {
+                startService(Intent(this, QuickSwitchService::class.java).setAction("STOP"))
+                AppLog.i("Bubble", "disabled")
+            }
+        }
+
+        // restore state
+        val savedAlpha = prefs.getInt("bubble_alpha", 75)
+        seekAlpha.progress = (100 - savedAlpha) * 80 / 100
+        tvAlpha.text = "$savedAlpha%"
+        swBubble.isChecked = prefs.getBoolean("bubble_on", false) && overlayGranted()
+        if (swBubble.isChecked && overlayGranted()) startForegroundService(Intent(this, QuickSwitchService::class.java))
+
+        swBubble.setOnCheckedChangeListener { _, on ->
+            if (on && !overlayGranted()) {
+                Toast.makeText(this, "Allow 'Display over other apps', then toggle again", Toast.LENGTH_LONG).show()
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
+                swBubble.isChecked = false
+            } else setBubble(on)
+        }
+
+        seekAlpha.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                val alphaPct = 100 - (progress * 100 / 80)   // right = more opaque
+                tvAlpha.text = "$alphaPct%"
+                prefs.edit().putInt("bubble_alpha", alphaPct).apply()
+                if (swBubble.isChecked) startService(Intent(this@MainActivity, QuickSwitchService::class.java).putExtra("alpha", alphaPct))
+            }
+            override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
+        })
+
         findViewById<Button>(R.id.btnPickIME).setOnClickListener {
             val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
             imm.showInputMethodPicker()

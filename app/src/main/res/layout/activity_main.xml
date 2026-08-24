@@ -19,8 +19,24 @@
         <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
                 <TextView android:text="Setup (one-time)" android:textStyle="bold" android:textSize="15sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnEnableIME" android:text="1. Enable Keyboard" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnPickIME" android:text="2. Switch to Whisper Speech to Text" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
+        <com.google.android.material.button.MaterialButton android:id="@+id/btnEnableIME" android:text="1. Enable Keyboard" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+        <com.google.android.material.button.MaterialButton android:id="@+id/btnPickIME" android:text="2. Switch to Whisper Speech to Text" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
+
+        <!-- Floating mic bubble (quick switch) -->
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#E8F5F0" app:strokeColor="#B2DFDB" app:strokeWidth="1dp" android:layout_marginTop="10dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
+                <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                    <TextView android:text="Mic Bubble (one-tap switch)" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
+                    <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchBubble" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                </LinearLayout>
+                <TextView android:text="Floating 🎤 on screen - tap: Whisper ↔ your keyboard. Drag to move." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="6dp">
+                    <TextView android:text="Transparency:" android:textSize="12sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingEnd="6dp"/>
+                    <SeekBar android:id="@+id/seekBubbleAlpha" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="80" android:progress="20"/>
+                    <TextView android:id="@+id/tvBubbleAlpha" android:text="75%" android:textSize="12sp" android:textStyle="bold" android:textColor="#212121" android:layout_width="44dp" android:layout_height="wrap_content" android:gravity="end"/>
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

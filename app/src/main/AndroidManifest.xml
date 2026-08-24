@@ -7,7 +7,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+<uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"/>
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
@@ -43,7 +44,16 @@
                 android:resource="@xml/method"/>
         </service>
 
-                <service
+                        <service
+            android:name=".QuickSwitchService"
+            android:label="Mic Bubble Quick Switch"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Floating bubble for one-tap switching to voice typing"/>
+        </service>
+<service
             android:name=".WhisperRecognitionService"
             android:label="Whisper Voice Typing"
             android:permission="android.permission.BIND_RECOGNITION_SERVICE"
@@ -64,4 +74,5 @@
 
     </application>
 </manifest>
+
 
