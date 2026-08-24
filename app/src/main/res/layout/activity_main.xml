@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp"
+    android:background="#F5F5F5">
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <TextView
+            android:text="Whisper Speech to Text"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <TextView
+            android:text="Offline voice typing + meeting recorder"
+            android:textSize="13sp"
+            android:textColor="#666666"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnEnableIME"
+            android:text="1. Enable Keyboard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnPickIME"
+            android:text="2. Switch to Whisper Speech to Text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="14dp"/>
+
+        <!-- Model Selection -->
+        <TextView
+            android:text="Model (select directly from keyboard too)"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <Spinner
+            android:id="@+id/spinnerModel"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="#FFFFFF"
+            android:layout_marginTop="4dp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDownloadModel"
+            android:text="Download Model"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"/>
+
+        <ProgressBar
+            android:id="@+id/progressModel"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:layout_marginTop="4dp"/>
+
+        <TextView
+            android:id="@+id/tvDownloadStatus"
+            android:text="Select model and download"
+            android:textSize="12sp"
+            android:textColor="#666666"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"/>
+
+        <!-- Downloaded Models -->
+        <TextView
+            android:text="Downloaded Models"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <TextView
+            android:id="@+id/tvModelInfo"
+            android:text=""
+            android:textSize="12sp"
+            android:textColor="#555555"
+            android:fontFamily="monospace"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#FFFFFF"
+            android:padding="8dp"
+            android:layout_marginTop="4dp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnClearModels"
+            android:text="Clear All Downloaded Models"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            style="@style/Widget.Material3.Button.OutlinedButton"/>
+
+        <!-- Voice Typing Output Method -->
+        <TextView
+            android:text="Voice Typing Output"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"/>
+
+        <TextView
+            android:text="Also selectable directly on keyboard"
+            android:textSize="11sp"
+            android:textColor="#888888"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <RadioGroup
+            android:id="@+id/radioEntryMode"
+            android:orientation="vertical"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp">
+
+            <RadioButton android:id="@+id/radioEntryType" android:text="Type into focus area" android:checked="true"/>
+            <RadioButton android:id="@+id/radioEntryTxt" android:text="Save to TXT (Documents/WhisperNotes/whisper_YYYY-MM-DD.txt)"/>
+            <RadioButton android:id="@+id/radioEntryBoth" android:text="Both - type + save TXT"/>
+        </RadioGroup>
+
+        <!-- Language -->
+        <TextView
+            android:text="Language"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"/>
+
+        <Spinner
+            android:id="@+id/spinnerLang"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="#FFFFFF"
+            android:layout_marginTop="4dp"/>
+
+        <!-- Meeting Recording -->
+        <TextView
+            android:text="Meeting Recording"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"/>
+
+        <RadioGroup
+            android:id="@+id/radioMode"
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp">
+
+            <RadioButton
+                android:id="@+id/radioTxt"
+                android:text="Save as TXT"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:checked="true"/>
+
+            <RadioButton
+                android:id="@+id/radioType"
+                android:text="Type into focus area"
+                android:layout_width="0dp"
+                android:layout_weight="1"/>
+        </RadioGroup>
+
+        <TextView
+            android:text="TXT: saves words to Documents/WhisperNotes/meeting_xxx.txt"
+            android:textSize="11sp"
+            android:textColor="#888888"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <TextView
+            android:text="Type: commits transcribed text into the focused text field"
+            android:textSize="11sp"
+            android:textColor="#888888"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnStartMeeting"
+            android:text="Start Meeting Recording"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnStopMeeting"
+            android:text="Stop and Save"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView
+            android:id="@+id/tvMeetingStatus"
+            android:text="Idle"
+            android:textSize="14sp"
+            android:textColor="#333333"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <TextView
+            android:id="@+id/tvMeetingPath"
+            android:textSize="11sp"
+            android:textColor="#888888"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"/>
+
+        <ProgressBar
+            android:id="@+id/progressTranscribe"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="10dp"
+            android:max="100"
+            android:progress="0"
+            android:layout_marginTop="8dp"/>
+
+        <TextView
+            android:id="@+id/tvProgressPct"
+            android:text="0% - idle"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="#6C5CE7"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <TextView
+            android:id="@+id/tvQueue"
+            android:text="Queue: 0 pending | Engine idle"
+            android:textSize="13sp"
+            android:textColor="#666666"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"/>
+
+        <TextView
+            android:text="Voice typing: In any app, select Whisper Speech to Text, tap Speak, talk, tap Stop. Text auto-inserts or saves per your Output setting."
+            android:textSize="12sp"
+            android:textColor="#888888"
+            android:lineSpacingExtra="2dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+    </LinearLayout>
+</ScrollView>

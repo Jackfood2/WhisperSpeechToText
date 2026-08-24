@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#1E1E2E"
+    android:padding="6dp">
+
+    <TextView
+        android:id="@+id/tvStatus"
+        android:text="Tap Speak to start voice typing"
+        android:textColor="#A0A0C0"
+        android:textSize="11sp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingBottom="4dp"
+        android:ellipsize="end"
+        android:maxLines="1"/>
+
+    <LinearLayout
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center">
+
+        <Button android:id="@+id/btnMic" android:text="Speak" android:layout_width="0dp" android:layout_weight="1" android:layout_height="50dp" android:textSize="15sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#00B894"/>
+        <Button android:id="@+id/btnStop" android:text="Stop" android:layout_width="0dp" android:layout_weight="1" android:layout_height="50dp" android:layout_marginStart="6dp" android:textSize="15sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#E17055" android:enabled="false"/>
+    </LinearLayout>
+
+    <!-- Mini progress -->
+    <LinearLayout
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:layout_marginTop="6dp">
+
+        <ProgressBar
+            android:id="@+id/progressTranscribe"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="8dp"
+            android:max="100"
+            android:progress="0"
+            android:progressTint="#00B894"/>
+
+        <TextView
+            android:id="@+id/tvProgressPct"
+            android:text="0%"
+            android:textSize="11sp"
+            android:textColor="#FFD700"
+            android:layout_width="42dp"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:paddingStart="6dp"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:layout_marginTop="6dp">
+        <TextView android:text="Model:" android:textSize="11sp" android:textColor="#A0A0C0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingEnd="6dp"/>
+        <Button android:id="@+id/btnModelTiny" android:text="tiny" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:textSize="10sp" android:backgroundTint="#636E72"/>
+        <Button android:id="@+id/btnModelBase" android:text="base" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:backgroundTint="#636E72"/>
+        <Button android:id="@+id/btnModelSmall" android:text="small" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:backgroundTint="#00B894"/>
+        <Button android:id="@+id/btnModelMedium" android:text="medium" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:backgroundTint="#636E72"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:layout_marginTop="4dp">
+        <TextView android:text="Output:" android:textSize="11sp" android:textColor="#A0A0C0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingEnd="6dp"/>
+        <Button android:id="@+id/btnModeType" android:text="Type" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:textSize="10sp" android:backgroundTint="#00B894"/>
+        <Button android:id="@+id/btnModeTxt" android:text="Save TXT" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:backgroundTint="#636E72"/>
+        <Button android:id="@+id/btnModeBoth" android:text="Both" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:backgroundTint="#636E72"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:orientation="horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:layout_marginTop="6dp">
+        <Button android:id="@+id/btnPause" android:text="Pause" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:textSize="10sp" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
+        <Button android:id="@+id/btnClear" android:text="Clear Queue" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="4dp" android:textSize="10sp" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
+        <Button android:id="@+id/btnRetry" android:text="Retry Failed" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="4dp" android:textSize="10sp" android:textColor="#FFFFFF" android:backgroundTint="#FDCB6E"/>
+    </LinearLayout>
+
+    <TextView android:id="@+id/tvQueueBadge" android:text="" android:textSize="10sp" android:textColor="#FFD700" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:paddingTop="4dp"/>
+
+</LinearLayout>
