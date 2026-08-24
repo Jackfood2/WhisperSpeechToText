@@ -184,6 +184,28 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnClearModels).setOnClickListener { clearModels() }
+        findViewById<Button>(R.id.btnTestModel).setOnClickListener {
+            val m = models[spinnerModel.selectedItemPosition.coerceAtLeast(0)]
+            val mf = ModelManager.modelFile(this, m)
+            if (!mf.exists() || mf.length() < 1_000_000) {
+                tvStatus.text = "TEST $m: not downloaded"
+                AppLog.e("ModelTest", "$m not downloaded")
+                return@setOnClickListener
+            }
+            tvStatus.text = "TEST: loading $m..."
+            AppLog.i("ModelTest", "start load test: $m")
+            Thread {
+                val t0 = System.currentTimeMillis()
+                val ok = WhisperEngine.ensureModel(mf.absolutePath)
+                val ms = System.currentTimeMillis() - t0
+                val msg = if (ok) "TEST OK: $m loaded in ${ms}ms" else "TEST FAILED: $m (${WhisperEngine.lastError})"
+                AppLog.i("ModelTest", msg)
+                runOnUiThread {
+                    tvStatus.text = msg
+                    Toast.makeText(this, msg, if (ok) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
+                }
+            }.start()
+        }
         findViewById<Button>(R.id.btnSaveSettings).setOnClickListener {
             // settings already auto-saved via listeners, this confirms and triggers keyboard refresh via prefs
             val prefs = getSharedPreferences("whisper", MODE_PRIVATE)

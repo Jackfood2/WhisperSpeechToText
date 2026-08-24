@@ -72,14 +72,16 @@ class WhisperKeyboardService : InputMethodService() {
                 val mf = ModelManager.modelFile(this, m)
                 if (!mf.exists() || mf.length() < 1_000_000) {
                     handler.post { updateStatus("$m model not downloaded - open app to download") }
+                    AppLog.w(TAG, "preload($from): $m not downloaded")
                     return@Thread
                 }
                 if (!WhisperEngine.isLoaded(mf.absolutePath)) {
                     handler.post { updateStatus("Loading $m model...") }
                     val ok = WhisperEngine.ensureModel(mf.absolutePath)
-                    handler.post { updateStatus(if (ok) "$m ready - tap Speak" else "Model load FAILED - open app") }
+                    handler.post { updateStatus(if (ok) "$m ready - tap Speak" else "Model load FAILED - see Dashboard log") }
+                    AppLog.i(TAG, "preload($from): $m ok=$ok")
                 }
-            } catch (_: Throwable) {}
+            } catch (e: Throwable) { AppLog.e(TAG, "preload error: ${e.message}") }
         }.apply { isDaemon = true; name = "model-preload-$from"; start() }
     }
 
@@ -403,6 +405,7 @@ class WhisperKeyboardService : InputMethodService() {
                             tailPcm.delete()
                             pcmFile!!.delete()
                             Log.i(TAG, "LIVE tail mode: total=$total consumed=$liveConsumedBytes tail=$tailLen")
+                            AppLog.i(TAG, "LIVE tail: total=$total consumed=$liveConsumedBytes tail=$tailLen")
                         } else {
                             Log.i(TAG, "LIVE tail too short ($tailLen bytes) - keeping LIVE text only")
                             pcmFile!!.delete()
@@ -520,10 +523,9 @@ class WhisperKeyboardService : InputMethodService() {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
-        if (finishingInput) {
-            // interface switched away/closed -> unload when idle (recording/queue keep it alive)
-            handler.postDelayed({ maybeUnload("inputFinished") }, 1500)
-        }
+        // Model stays cached while the process lives - unloading on every keyboard hide caused
+        // reload failures under memory pressure ("model load failed" during LIVE).
+        // Unload happens only when the IME is destroyed (onDestroy) and idle.
     }
 
     override fun onDestroy() {
@@ -534,6 +536,7 @@ class WhisperKeyboardService : InputMethodService() {
         try { activeRecorder?.stop() } catch (_: Exception) {}
         try { activeRecorder?.release() } catch (_: Exception) {}
         stopImeForeground()
+        AppLog.i(TAG, "IME destroyed - unload check")
         maybeUnload("onDestroy")
         super.onDestroy()
     }

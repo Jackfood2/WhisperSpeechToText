@@ -85,5 +85,23 @@ class PrivacyDashboardActivity : AppCompatActivity() {
             Toast.makeText(this, "Deleted $n transcripts", Toast.LENGTH_SHORT).show(); refresh()
         }
         findViewById<Button>(R.id.btnRefresh).setOnClickListener { refresh() }
+
+        // ---- functionality / error log section ----
+        val tvDiag = findViewById<TextView>(R.id.tvDiagLog)
+        fun refreshDiag() {
+            val dump = AppLog.dump()
+            tvDiag.text = if (dump.isBlank()) "No log events yet." else if (AppLog.lastError.isNotEmpty()) "LAST ERROR: ${AppLog.lastError}\n\n$dump" else dump
+        }
+        refreshDiag()
+        findViewById<Button>(R.id.btnRefreshDiag).setOnClickListener { refreshDiag(); Toast.makeText(this, "Log refreshed", Toast.LENGTH_SHORT).show() }
+        findViewById<Button>(R.id.btnCopyDiag).setOnClickListener {
+            val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cb.setPrimaryClip(ClipData.newPlainText("whisper_diag_log", AppLog.dump()))
+            Toast.makeText(this, "Error/log copied to clipboard - paste it to the developer", Toast.LENGTH_LONG).show()
+        }
+        findViewById<Button>(R.id.btnClearDiag).setOnClickListener {
+            AppLog.clear(); AppLog.i("Dashboard", "log cleared by user"); refreshDiag()
+            Toast.makeText(this, "Log cleared", Toast.LENGTH_SHORT).show()
+        }
     }
 }

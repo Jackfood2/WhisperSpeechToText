@@ -9,12 +9,13 @@ object WhisperEngine {
     init {
         try {
             System.loadLibrary("whisper_jni")
-            android.util.Log.i("WhisperEngine", "Native library loaded successfully")
-        } catch (e: UnsatisfiedLinkError) {
-            android.util.Log.e("WhisperEngine", "Failed to load native library: ${e.message}")
+            AppLog.i("WhisperEngine", "Native library loaded")
+        } catch (e: Throwable) {
+            AppLog.e("WhisperEngine", "Failed to load native library: ${e.message}")
         }
     }
 
+    private const val TAG = "WhisperEngine"
     private val lock = ReentrantLock()
     private val busyCount = AtomicInteger(0)
 
@@ -26,8 +27,7 @@ object WhisperEngine {
     private external fun nativeFree()
     private external fun nativeTranscribe(modelPath: String, wavPath: String, lang: String): String
 
-    /** Preload/cache the model. Safe to call repeatedly; no-op if already loaded for this path.
-     *  If a different model is cached, it is unloaded and the new one loaded (when idle). */
+    /** Preload/cache the model with retries. No-op if already loaded for this path. */
     fun ensureModel(modelPath: String): Boolean {
         if (modelPath.isBlank()) return false
         lock.withLock {
@@ -35,21 +35,31 @@ object WhisperEngine {
                 val f = java.io.File(modelPath)
                 if (!f.exists() || f.length() < 1_000_000) {
                     lastError = "Model file missing"
-                    android.util.Log.e("WhisperEngine", "ensureModel: file missing/incomplete: $modelPath (${if (f.exists()) f.length() else 0} bytes)")
+                    AppLog.e(TAG, "file missing/incomplete: $modelPath (${if (f.exists()) f.length() else 0} bytes)")
                     return false
                 }
-                val handle = nativeInit(modelPath)
-                if (handle > 0) {
-                    loadedPath = modelPath
-                    lastError = ""
-                    android.util.Log.i("WhisperEngine", "Model ready: $modelPath")
-                    return true
+                if (loadedPath == modelPath) return true
+                var lastMsg = ""
+                for (attempt in 1..3) {
+                    val t0 = System.currentTimeMillis()
+                    val handle = try { nativeInit(modelPath) } catch (e: Throwable) { AppLog.e(TAG, "nativeInit threw: ${e.message}"); -1L }
+                    val ms = System.currentTimeMillis() - t0
+                    if (handle > 0) {
+                        loadedPath = modelPath
+                        lastError = ""
+                        AppLog.i(TAG, "load OK ($ms ms, attempt $attempt): ${f.name}")
+                        return true
+                    }
+                    lastMsg = "init returned $handle after $ms ms"
+                    AppLog.w(TAG, "load attempt $attempt failed: $lastMsg")
+                    Thread.sleep(400)
                 }
                 lastError = "Model load failed"
+                AppLog.e(TAG, "load FAILED after 3 attempts: $lastMsg (${f.name}, ${f.length() / 1024 / 1024} MB)")
                 return false
             } catch (e: Throwable) {
                 lastError = e.message ?: "load error"
-                android.util.Log.e("WhisperEngine", "ensureModel failed: ${e.message}")
+                AppLog.e(TAG, "ensureModel error: ${e.message}")
                 return false
             }
         }
@@ -63,16 +73,17 @@ object WhisperEngine {
     fun unloadIfIdle(): Boolean {
         lock.withLock {
             if (busyCount.get() > 0) {
-                android.util.Log.i("WhisperEngine", "Skip unload - transcription busy")
+                AppLog.i(TAG, "skip unload - transcription busy")
                 return false
             }
             return try {
+                val was = loadedPath
                 nativeFree()
                 loadedPath = null
-                android.util.Log.i("WhisperEngine", "Model unloaded (idle)")
+                AppLog.i(TAG, "unloaded ${was?.substringAfterLast('/') ?: "-"}")
                 true
             } catch (e: Throwable) {
-                android.util.Log.w("WhisperEngine", "unload failed: ${e.message}")
+                AppLog.w(TAG, "unload failed: ${e.message}")
                 false
             }
         }
@@ -80,30 +91,40 @@ object WhisperEngine {
 
     fun transcribe(modelPath: String, wavPath: String, lang: String): String {
         busyCount.incrementAndGet()
+        val t0 = System.currentTimeMillis()
         try {
             lock.withLock {
                 try {
                     val effectiveLang = if (lang == "auto" || lang.isEmpty()) "auto" else lang
-                    // self-heal: reload if something freed the cache behind our back
+                    // self-heal: reload if cache is empty or different (with one retry)
                     if (loadedPath != modelPath) {
-                        val handle = nativeInit(modelPath)
-                        if (handle <= 0) {
+                        var ok = false
+                        for (attempt in 1..2) {
+                            val handle = try { nativeInit(modelPath) } catch (e: Throwable) { AppLog.e(TAG, "reload threw: ${e.message}"); -1L }
+                            if (handle > 0) { ok = true; break }
+                            AppLog.w(TAG, "reload attempt $attempt failed"); Thread.sleep(300)
+                        }
+                        if (!ok) {
                             lastError = "Model load failed"
+                            AppLog.e(TAG, "transcribe aborted - model reload failed: $modelPath")
                             return "ERROR: Failed to load whisper model"
                         }
                         loadedPath = modelPath
+                        AppLog.i(TAG, "reloaded model in transcribe: ${modelPath.substringAfterLast('/')}")
                     }
                     val out = nativeTranscribe(modelPath, wavPath, effectiveLang)
+                    val ms = System.currentTimeMillis() - t0
+                    AppLog.i(TAG, "transcribed in $ms ms -> ${out.take(60)}")
                     lastError = if (out.startsWith("ERROR:")) out else ""
                     return out
                 } catch (e: OutOfMemoryError) {
                     lastError = "Out of memory"
-                    android.util.Log.e("WhisperEngine", "OOM during transcribe - freeing model", e)
+                    AppLog.e(TAG, "OOM during transcribe - freeing model")
                     try { nativeFree(); loadedPath = null } catch (_: Throwable) {}
                     return "ERROR: Out of memory - try a smaller model"
                 } catch (e: Throwable) {
                     lastError = e.message ?: "transcribe error"
-                    android.util.Log.e("WhisperEngine", "Transcribe error: ${e.message}")
+                    AppLog.e(TAG, "Transcribe error: ${e.message}")
                     return "ERROR: ${e.message}"
                 } finally {
                     // nothing extra

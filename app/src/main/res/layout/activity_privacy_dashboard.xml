@@ -21,10 +21,24 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
+    <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" app:strokeColor="#E0E0E0" app:strokeWidth="1dp" android:layout_marginBottom="12dp">
         <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
             <TextView android:text="Recent transcripts (preview)" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
             <TextView android:id="@+id/tvLogs" android:text="" android:textSize="13sp" android:textColor="#212121" android:fontFamily="monospace" android:background="#F5F5F5" android:padding="10dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" app:strokeColor="#E0E0E0" app:strokeWidth="1dp" android:layout_marginBottom="12dp">
+        <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
+            <TextView android:text="Functionality / error log (last 300 events)" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+            <ScrollView android:layout_width="match_parent" android:layout_height="260dp" android:layout_marginTop="6dp" android:background="#F5F5F5">
+                <TextView android:id="@+id/tvDiagLog" android:text="" android:textSize="11sp" android:textColor="#212121" android:fontFamily="monospace" android:padding="10dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            </ScrollView>
+            <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp">
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnCopyDiag" android:text="Copy Error/Log" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnClearDiag" android:text="Clear Log" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:layout_marginStart="8dp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnRefreshDiag" android:text="Refresh" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:layout_marginStart="8dp"/>
+            </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 </LinearLayout>

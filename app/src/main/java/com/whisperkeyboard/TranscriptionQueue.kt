@@ -1,4 +1,4 @@
-package com.whisperkeyboard
+﻿package com.whisperkeyboard
 
 import android.content.Context
 import android.os.Environment
@@ -207,7 +207,7 @@ object TranscriptionQueue {
                     val job = try { queue.poll(500, TimeUnit.MILLISECONDS) } catch (e: InterruptedException) { null }
                     if (job == null) { isProcessing = false; stopSimulatedProgress(); notifyProgress(0); Log.i(TAG, "Worker idle"); break }
                     currentModel = job.model
-                    Log.i(TAG, "Processing job: model=${job.model} lang=${job.lang} file=${job.wavFile.name} size=${job.wavFile.length()}")
+                    AppLog.i(TAG, "process ${job.model}/${job.lang} ${job.wavFile.name} (${job.wavFile.length() / 1024} KB)")
                     val audioSec = estimateSeconds(job.wavFile)
                     val startMs = System.currentTimeMillis()
                     startSimulatedProgress(job.context, job.model, job.wavFile)
@@ -223,10 +223,11 @@ object TranscriptionQueue {
                             resultText = WhisperEngine.transcribe(modelFile.absolutePath, job.wavFile.absolutePath, job.lang).trim()
                             if (resultText.startsWith("ERROR:")) {
                                 // native-level failure: retry once (self-heal reloads model), then fail
-                                if (attempt < 2) { Log.w(TAG, "Attempt $attempt returned ${resultText.take(60)} - retrying"); continue }
+                            if (attempt < 2) { Log.w(TAG, "Attempt $attempt returned ${resultText.take(60)} - retrying"); AppLog.w(TAG, "attempt $attempt ERROR result - retrying"); continue }
                                 throw IllegalStateException(resultText)
                             }
                             Log.i(TAG, "Result: ${resultText.take(120)}")
+                            AppLog.i(TAG, "done ${job.model} in ${(System.currentTimeMillis() - startMs) / 1000.0}s: ${resultText.take(50)}")
                             success = true
                             val elapsedSec = (System.currentTimeMillis() - startMs) / 1000.0
                             recordStats(job.context, job.model, audioSec, elapsedSec)
@@ -235,6 +236,7 @@ object TranscriptionQueue {
                         } catch (e: Exception) {
                             if (attempt < 2) { Log.w(TAG, "Attempt $attempt failed: ${e.message} - retrying"); Thread.sleep(300); continue }
                             Log.e(TAG, "Transcribe failed after $attempt attempts: ${e.message}", e)
+                            AppLog.e(TAG, "transcribe failed x$attempt: ${e.message}")
                             errorMsg = e.message ?: "Unknown error"
                             stopSimulatedProgress(); notifyProgress(0)
                             break
@@ -277,3 +279,4 @@ object TranscriptionQueue {
         }
     }
 }
+
