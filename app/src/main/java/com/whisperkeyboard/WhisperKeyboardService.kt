@@ -605,6 +605,16 @@ class WhisperKeyboardService : InputMethodService() {
         updateQueueBadge()
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // Intelligent unload: system needs RAM -> release the cached model when safe.
+        // unloadIfIdle() refuses while a transcription is in flight; recording/queue checked too.
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            AppLog.i(TAG, "memory pressure level=$level -> unload check")
+            Thread { maybeUnload("trimMemory$level") }.apply { isDaemon = true; start() }
+        }
+    }
+
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         // Model stays cached while the process lives - unloading on every keyboard hide caused

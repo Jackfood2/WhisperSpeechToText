@@ -249,6 +249,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            Thread { if (WhisperEngine.unloadIfIdle()) runOnUiThread { tvStatus.text = localStatusText(models[spinnerModel.selectedItemPosition.coerceAtLeast(0)]) } }.start()
+        }
+    }
+
     override fun onDestroy() {
         TranscriptionQueue.removeListener(pqListener)
         super.onDestroy()
