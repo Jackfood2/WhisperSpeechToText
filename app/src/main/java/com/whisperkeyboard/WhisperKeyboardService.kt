@@ -39,7 +39,11 @@ class WhisperKeyboardService : InputMethodService() {
     private var tvPct: TextView? = null
     private var progressBar: ProgressBar? = null
     private var btnMic: Button? = null
-    private var btnStop: Button? = null
+    private var btnCloseKeyboard: Button? = null
+    private var btnBackspace: Button? = null
+    private var rowProcessing: View? = null
+    private var btnSkipOne: Button? = null
+    private var btnStopAll: Button? = null
     private var btnPause: Button? = null
     private var btnClear: Button? = null
     private var btnRetry: Button? = null
@@ -55,6 +59,39 @@ class WhisperKeyboardService : InputMethodService() {
     private var btnBt: Button? = null
     private var btnCaps: Button? = null
     private val handler = Handler(Looper.getMainLooper())
+    private val backspaceHandler = Handler(Looper.getMainLooper())
+    private val backspaceRepeater = object : Runnable {
+        override fun run() {
+            try { currentInputConnection?.deleteSurroundingText(1, 0) } catch (_: Exception) {}
+            backspaceHandler.postDelayed(this, 50)
+        }
+    }
+
+    private fun deleteLastWord() {
+        try {
+            val ic = currentInputConnection ?: return
+            val before = ic.getTextBeforeCursor(48, 0) ?: return
+            val trimmed = before.trimEnd()
+            val n = when {
+                trimmed.isEmpty() -> before.length.coerceAtLeast(1)
+                else -> {
+                    val idx = trimmed.lastIndexOf(' ')
+                    before.length - (if (idx < 0) 0 else idx + 1)
+                }
+            }.coerceIn(1, 48)
+            ic.deleteSurroundingText(n, 0)
+        } catch (_: Exception) {}
+    }
+
+    /** Show Skip/Stop-All row only while the queue is busy. */
+    private fun updateProcessingRow() {
+        val busy = TranscriptionQueue.isActive()
+        rowProcessing?.visibility = if (busy) View.VISIBLE else View.GONE
+        if (busy) {
+            val (cur, total) = TranscriptionQueue.batchPosition()
+            tvPct?.text = "$cur/$total"
+        }
+    }
     private val previewExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "live-preview").apply { isDaemon = true } }
     @Volatile private var previewBusy = false
     @Volatile private var lastComposing = ""
@@ -101,8 +138,11 @@ class WhisperKeyboardService : InputMethodService() {
         override fun onProgress(pct: Int) {
             handler.post {
                 progressBar?.progress = pct
-                tvPct?.text = "$pct%"
-                if (pct in 1..99) tvStatus?.text = "Transcribing... $pct%"
+                updateProcessingRow()
+                if (TranscriptionQueue.isActive()) {
+                    val (cur, total) = TranscriptionQueue.batchPosition()
+                    if (pct in 1..99) tvStatus?.text = "Processing... $cur/$total ($pct%)"
+                }
             }
         }
     }
@@ -116,7 +156,11 @@ class WhisperKeyboardService : InputMethodService() {
         tvPct = view.findViewById(R.id.tvProgressPct)
         progressBar = view.findViewById(R.id.progressTranscribe)
         btnMic = view.findViewById(R.id.btnMic)
-        btnStop = view.findViewById(R.id.btnStop)
+        btnCloseKeyboard = view.findViewById(R.id.btnCloseKeyboard)
+        btnBackspace = view.findViewById(R.id.btnBackspace)
+        rowProcessing = view.findViewById(R.id.rowProcessing)
+        btnSkipOne = view.findViewById(R.id.btnSkipOne)
+        btnStopAll = view.findViewById(R.id.btnStopAll)
         btnPause = view.findViewById(R.id.btnPause)
         btnClear = view.findViewById(R.id.btnClear)
         btnRetry = view.findViewById(R.id.btnRetry)
@@ -132,7 +176,8 @@ class WhisperKeyboardService : InputMethodService() {
         btnBt = view.findViewById(R.id.btnBt)
         btnCaps = view.findViewById(R.id.btnCaps)
 
-        btnMic?.setOnClickListener { if (!isRecording.get()) startRecording() }
+        // One-button scheme: mic toggles Speak / Stop
+        btnMic?.setOnClickListener { if (!isRecording.get()) startRecording() else stopRecordingAndTranscribe() }
         // Long-press mic: voice input selection (pick another voice input method)
         btnMic?.setOnLongClickListener {
             try {
@@ -142,7 +187,34 @@ class WhisperKeyboardService : InputMethodService() {
             } catch (_: Exception) {}
             true
         }
-        btnStop?.setOnClickListener { if (isRecording.get()) stopRecordingAndTranscribe() }
+        // Close (X): hide the keyboard; recording/transcription continue in background
+        btnCloseKeyboard?.setOnClickListener {
+            Toast.makeText(this, if (isRecording.get() || TranscriptionQueue.isActive()) "Continues in background" else "Closed", Toast.LENGTH_SHORT).show()
+            try { requestHideSelf(0) } catch (_: Exception) {}
+        }
+        // Backspace: tap = delete last word, hold = repeat char deletion
+        btnBackspace?.setOnClickListener { deleteLastWord() }
+        btnBackspace?.setOnTouchListener { v, ev ->
+            when (ev.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    backspaceHandler.postDelayed(backspaceRepeater, 400)
+                    v.performClick()
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    backspaceHandler.removeCallbacks(backspaceRepeater)
+                    true
+                }
+                else -> false
+            }
+        }
+        btnSkipOne?.setOnClickListener { TranscriptionQueue.skipCurrentJob(); updateStatus("Skipping current..."); updateProcessingRow() }
+        btnStopAll?.setOnClickListener {
+            val n = TranscriptionQueue.stopEverything()
+            updateStatus("Stopped all ($n cleared)")
+            progressBar?.progress = 0; tvPct?.text = "0%"
+            updateProcessingRow(); updateQueueBadge()
+        }
         btnPause?.setOnClickListener {
             val nowPaused = TranscriptionQueue.togglePause()
             btnPause?.text = if (nowPaused) "Resume" else "Pause"
@@ -287,7 +359,8 @@ class WhisperKeyboardService : InputMethodService() {
         }
         isRecording.set(true)
         startImeForeground()
-        btnMic?.isEnabled = false; btnStop?.isEnabled = true; btnMic?.text = "Recording..."
+        btnMic?.text = "■ Stop"
+        try { btnMic?.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFFE17055.toInt()) } catch (_: Exception) {}
         try { btnMic?.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFFE17055.toInt()) } catch (_: Exception) {}
         updateStatus("Listening... tap Stop (VAD auto-stops)")
         progressBar?.progress = 0; tvPct?.text = "REC"
@@ -490,7 +563,8 @@ class WhisperKeyboardService : InputMethodService() {
     }
 
     private fun resetMicButton() {
-        btnMic?.isEnabled = true; btnStop?.isEnabled = false; btnMic?.text = "Speak"
+        btnMic?.isEnabled = true; btnMic?.text = "🎤 Speak"
+        try { btnMic?.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF00B894.toInt()) } catch (_: Exception) {}
         try { btnMic?.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF00B894.toInt()) } catch (_: Exception) {}
         refreshAllButtons()
     }
@@ -502,12 +576,18 @@ class WhisperKeyboardService : InputMethodService() {
         tvQueueBadge?.text = s
         btnPause?.text = if (TranscriptionQueue.isPaused()) "Resume" else "Pause"
         progressBar?.progress = TranscriptionQueue.progress()
-        tvPct?.text = "${TranscriptionQueue.progress()}%"
+        if (!TranscriptionQueue.isActive()) {
+            tvPct?.text = "${TranscriptionQueue.progress()}%"
+        } else {
+            val (cur, total) = TranscriptionQueue.batchPosition()
+            tvPct?.text = "$cur/$total"
+        }
+        updateProcessingRow()
         tvQueueBadge?.postDelayed({
             tvQueueBadge?.text = TranscriptionQueue.status()
             btnPause?.text = if (TranscriptionQueue.isPaused()) "Resume" else "Pause"
             progressBar?.progress = TranscriptionQueue.progress()
-            tvPct?.text = "${TranscriptionQueue.progress()}%"
+            if (!TranscriptionQueue.isActive()) tvPct?.text = "${TranscriptionQueue.progress()}%" else updateProcessingRow()
         }, 1200)
     }
 

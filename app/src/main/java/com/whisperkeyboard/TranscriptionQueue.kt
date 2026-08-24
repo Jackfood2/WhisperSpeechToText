@@ -30,6 +30,10 @@ object TranscriptionQueue {
 
     private val queue = LinkedBlockingQueue<Job>()
     private val pendingCount = AtomicInteger(0)
+    private val submittedCount = AtomicInteger(0)
+    private val completedCount = AtomicInteger(0)
+    private val skipCurrentFlag = AtomicBoolean(false)
+    private val stopAllFlag = AtomicBoolean(false)
     private val failedJobs = mutableListOf<Job>()
     private val paused = AtomicBoolean(false)
     private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "whisper-worker").apply { isDaemon = true } }
@@ -151,7 +155,7 @@ object TranscriptionQueue {
         val f = synchronized(failedJobs) { failedJobs.size }
         val state = when {
             paused.get() -> "PAUSED"
-            isProcessing -> "Processing $currentModel ${currentPct}% (${String.format("%.0f", currentFileSec)}s)"
+            isProcessing -> "Processing ${completedCount.get() + 1}/${submittedCount.get()} $currentModel ${currentPct}%"
             else -> "Idle"
         }
         val retry = if (f > 0) " | $f failed" else ""
@@ -163,8 +167,27 @@ object TranscriptionQueue {
     /** True when nothing is being transcribed and nothing is pending. */
     fun isActive(): Boolean = isProcessing || pendingCount.get() > 0
 
+    /** Discard the result of the currently processing job when it finishes; continue with next. */
+    fun skipCurrentJob() {
+        if (isProcessing) { skipCurrentFlag.set(true); AppLog.i(TAG, "skip requested for current job") }
+    }
+
+    /** Skip current + clear everything queued. */
+    fun stopEverything(): Int {
+        AppLog.i(TAG, "STOP ALL requested")
+        skipCurrentFlag.set(true)
+        stopAllFlag.set(true)
+        paused.set(false)
+        return clearQueue()
+    }
+
+    /** Position info for UI: 1-based index of job being processed / total submitted in batch. */
+    fun batchPosition(): Pair<Int, Int> = Pair(completedCount.get() + if (isProcessing) 1 else 0, submittedCount.get())
+
     fun enqueue(job: Job) {
+        stopAllFlag.set(false)
         pendingCount.incrementAndGet()
+        submittedCount.incrementAndGet()
         queue.put(job)
         Log.i(TAG, "Enqueued job, pending=${pendingCount.get()} paused=${paused.get()}")
         ensureWorker()
@@ -205,7 +228,11 @@ object TranscriptionQueue {
                 try {
                     if (paused.get()) { Log.i(TAG, "Worker pausing"); isProcessing = false; stopSimulatedProgress(); notifyProgress(0); break }
                     val job = try { queue.poll(500, TimeUnit.MILLISECONDS) } catch (e: InterruptedException) { null }
-                    if (job == null) { isProcessing = false; stopSimulatedProgress(); notifyProgress(0); Log.i(TAG, "Worker idle"); break }
+                    if (job == null) {
+                        isProcessing = false; stopSimulatedProgress(); notifyProgress(0); Log.i(TAG, "Worker idle")
+                        submittedCount.set(0); completedCount.set(0); stopAllFlag.set(false)
+                        break
+                    }
                     currentModel = job.model
                     AppLog.i(TAG, "process ${job.model}/${job.lang} ${job.wavFile.name} (${job.wavFile.length() / 1024} KB)")
                     val audioSec = estimateSeconds(job.wavFile)
@@ -264,15 +291,21 @@ object TranscriptionQueue {
                     }
                     try {
                         pendingCount.decrementAndGet()
+                        completedCount.incrementAndGet()
                         if (success || job.wavFile.absolutePath.contains("cache")) {
                             try { if (job.wavFile.exists()) job.wavFile.delete() } catch (_: Exception) {}
                         }
                     } catch (_: Exception) {}
-                    if (success) job.onResult(resultText) else job.onError(errorMsg)
+                    val skipped = skipCurrentFlag.getAndSet(false)
+                    val stoppedAll = stopAllFlag.get()
+                    if (skipped || stoppedAll) {
+                        AppLog.i(TAG, "job dropped (${if (skipped) "skipped" else "stop-all"}) - result discarded")
+                    } else if (success) job.onResult(resultText) else job.onError(errorMsg)
                     notifyProgress(0)
                 } catch (t: Throwable) {
                     // never let the worker thread die
                     Log.e(TAG, "Worker loop error: ${t.message}", t)
+                    AppLog.e(TAG, "worker error: ${t.message}")
                     stopSimulatedProgress(); notifyProgress(0)
                 }
             }

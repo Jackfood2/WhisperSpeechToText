@@ -6,16 +6,28 @@
     android:background="#1E1E2E"
     android:padding="6dp">
 
-    <TextView android:id="@+id/tvStatus" android:text="Tap Speak to start voice typing" android:textColor="#EAEAF2" android:textSize="12sp" android:textStyle="bold" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:paddingBottom="4dp" android:ellipsize="end" android:maxLines="1"/>
-
-    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
-        <Button android:id="@+id/btnMic" android:text="Speak" android:layout_width="0dp" android:layout_weight="1" android:layout_height="50dp" android:textSize="15sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#00B894"/>
-        <Button android:id="@+id/btnStop" android:text="Stop" android:layout_width="0dp" android:layout_weight="1" android:layout_height="50dp" android:layout_marginStart="6dp" android:textSize="15sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#E17055" android:enabled="false"/>
+    <!-- Status + close -->
+    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <TextView android:id="@+id/tvStatus" android:text="Tap the mic to start voice typing" android:textColor="#EAEAF2" android:textSize="12sp" android:textStyle="bold" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1"/>
+        <Button android:id="@+id/btnCloseKeyboard" android:text="✕" android:layout_width="36dp" android:layout_height="32dp" android:textSize="14sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#3A3A5C" android:contentDescription="Close keyboard (processing continues)"/>
     </LinearLayout>
 
+    <!-- One-button mic (toggles Speak/Stop) + backspace -->
+    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+        <Button android:id="@+id/btnMic" android:text="🎤 Speak" android:layout_width="0dp" android:layout_weight="4" android:layout_height="52dp" android:textSize="16sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#00B894"/>
+        <Button android:id="@+id/btnBackspace" android:text="⌫" android:layout_width="0dp" android:layout_weight="1" android:layout_height="52dp" android:layout_marginStart="6dp" android:textSize="20sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#3A3A5C" android:contentDescription="Delete last word (hold = repeat)"/>
+    </LinearLayout>
+
+    <!-- Progress + batch position -->
     <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="6dp">
         <ProgressBar android:id="@+id/progressTranscribe" style="?android:attr/progressBarStyleHorizontal" android:layout_width="0dp" android:layout_weight="1" android:layout_height="8dp" android:max="100" android:progress="0" android:progressTint="#00B894"/>
-        <TextView android:id="@+id/tvProgressPct" android:text="0%" android:textSize="12sp" android:textStyle="bold" android:textColor="#FFD54F" android:layout_width="42dp" android:layout_height="wrap_content" android:gravity="end" android:paddingStart="6dp"/>
+        <TextView android:id="@+id/tvProgressPct" android:text="0%" android:textSize="12sp" android:textStyle="bold" android:textColor="#FFD54F" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="end" android:paddingStart="6dp" android:minWidth="64dp"/>
+    </LinearLayout>
+
+    <!-- Processing controls: visible only while queue busy -->
+    <LinearLayout android:id="@+id/rowProcessing" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:layout_marginTop="4dp" android:visibility="gone">
+        <Button android:id="@+id/btnSkipOne" android:text="Skip 1 ▸" android:layout_width="0dp" android:layout_weight="1" android:layout_height="30dp" android:textSize="11sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#E17055"/>
+        <Button android:id="@+id/btnStopAll" android:text="■ Stop All" android:layout_width="0dp" android:layout_weight="1" android:layout_height="30dp" android:layout_marginStart="6dp" android:textSize="11sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#D63031"/>
     </LinearLayout>
 
     <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="6dp">

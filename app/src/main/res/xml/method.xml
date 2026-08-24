@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<input-method xmlns:android="http://schemas.android.com/apk/res/android">
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:supportsSwitchingToNextInputMethod="true">
+    <!-- Keyboard mode: appears in keyboard pickers -->
     <subtype
         android:imeSubtypeMode="keyboard"
         android:label="Whisper Speech to Text"
         android:isDefault="true"/>
+    <!-- Voice mode: appears in voice-input selection (e.g. the mic on other keyboards / system voice entry points).
+         Selecting it opens Whisper voice typing directly. -->
+    <subtype
+        android:imeSubtypeMode="voice"
+        android:label="Whisper Voice Typing"
+        android:imeSubtypeLocale="en"/>
 </input-method>
