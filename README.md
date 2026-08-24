@@ -121,7 +121,7 @@ The device has no per-app model warm-up; first transcription after app launch is
 
 ## Donate
 
-If this saves you time, support offline development — **PayPal: jackfood2004@gmail.com** — [paypal.me/jackfood2004](https://www.paypal.com/paypalme/jackfood2004) — or use GitHub Sponsors ( ♥ Sponsor button on repo). Funds go to S23 FE testing + smaller/faster models.
+If this saves you time, support offline development — [paypal.me/jackfood2004](https://www.paypal.com/paypalme/jackfood2004) — or use GitHub Sponsors ( ♥ Sponsor button on repo). Funds go to S23 FE testing + smaller/faster models.
 
 > PayPal email: `jackfood2004@gmail.com` — also works via `Send money` in the PayPal app.
 
