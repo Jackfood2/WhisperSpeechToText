@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#FAFAFA" android:padding="12dp">
+
+    <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content">
+
+        <!-- Header -->
+        <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+            <TextView android:text="⚙ Settings" android:textSize="22sp" android:textStyle="bold" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnSettingsDone" android:text="Done" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        </LinearLayout>
+
+        <!-- Model -->
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
+                <TextView android:text="Model  •  also on keyboard (tiny/base/small/medium)" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <Spinner android:id="@+id/spinnerModel" android:layout_width="match_parent" android:layout_height="48dp" android:background="#FFFFFF" android:popupBackground="#FFFFFF" android:layout_marginTop="8dp" android:padding="8dp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnDownloadModel" android:text="Download Model" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnTestModel" android:text="Load Model Test" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+                <ProgressBar android:id="@+id/progressModel" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="10dp" android:visibility="gone" android:layout_marginTop="8dp"/>
+                <TextView android:id="@+id/tvDownloadStatus" android:text="Select model and download" android:textSize="13sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
+                <TextView android:text="Downloaded models:" android:textStyle="bold" android:textSize="13sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp"/>
+                <TextView android:id="@+id/tvModelInfo" android:text="" android:fontFamily="monospace" android:textSize="13sp" android:textColor="#212121" android:background="#F5F5F5" android:padding="10dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnClearModels" android:text="Clear All Models" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Language -->
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
+                <TextView android:text="Language" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <Spinner android:id="@+id/spinnerLang" android:layout_width="match_parent" android:layout_height="48dp" android:background="#FFFFFF" android:popupBackground="#FFFFFF" android:layout_marginTop="6dp" android:padding="8dp"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Voice Typing Output + Accuracy -->
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
+                <TextView android:text="Voice Typing Output" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <TextView android:text="Also on keyboard: Type / Save TXT / Both  •  LIVE preview  •  VAD auto-stop  •  BT mic" android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <RadioGroup android:id="@+id/radioEntryMode" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
+                    <RadioButton android:id="@+id/radioEntryType" android:text="Type into focus area (keyboard)" android:textSize="13sp" android:textColor="#212121" android:checked="true"/>
+                    <RadioButton android:id="@+id/radioEntryTxt" android:text="Save to TXT — Documents/WhisperNotes/" android:textSize="13sp" android:textColor="#212121"/>
+                    <RadioButton android:id="@+id/radioEntryBoth" android:text="Both — type + save TXT" android:textSize="13sp" android:textColor="#212121"/>
+                </RadioGroup>
+
+                <TextView android:text="Accuracy" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp"/>
+                <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp">
+                    <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchVad" android:text="VAD auto-stop" android:textSize="13sp" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:checked="true"/>
+                    <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchLive" android:text="LIVE typing" android:textSize="13sp" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:checked="true"/>
+                </LinearLayout>
+                <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp">
+                    <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchBt" android:text="Bluetooth mic" android:textSize="13sp" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
+                    <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchCaps" android:text="Auto caps" android:textSize="13sp" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:checked="true"/>
+                </LinearLayout>
+                <TextView android:text="VAD: silence 1.3s → auto Stop. LIVE: composing preview while speaking. BT: VOICE_COMMUNICATION." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Floating mic bubble -->
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#E8F5F0" app:strokeColor="#B2DFDB" app:strokeWidth="1dp" android:layout_marginTop="12dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
+                <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                    <TextView android:text="Mic Bubble (one-tap switch)" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
+                    <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchBubble" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                </LinearLayout>
+                <TextView android:text="Floating 🎤 on screen - tap: Whisper ↔ your keyboard. Drag to move." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="6dp">
+                    <TextView android:text="Transparency:" android:textSize="12sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingEnd="6dp"/>
+                    <SeekBar android:id="@+id/seekBubbleAlpha" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="80" android:progress="20"/>
+                    <TextView android:id="@+id/tvBubbleAlpha" android:text="75%" android:textSize="12sp" android:textStyle="bold" android:textColor="#212121" android:layout_width="44dp" android:layout_height="wrap_content" android:gravity="end"/>
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.button.MaterialButton android:id="@+id/btnSaveSettings" android:text="Save Settings (updates keyboard instantly)" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"/>
+
+    </LinearLayout>
+</ScrollView>
