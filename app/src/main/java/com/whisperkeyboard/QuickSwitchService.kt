@@ -199,7 +199,26 @@ class QuickSwitchService : Service() {
     private fun stopPtt() {
         if (!pttRecording) return
         pttRecording = false
+        // Switch to Whisper NOW so its IME owns the field by the time transcription finishes
+        val switched = ensureWhisperActive()
+        if (switched) toast("Switching to Whisper keyboard...")
         handler.post { bubble?.invalidate() }
+    }
+
+    /** Returns true if Whisper IME is (or now is) the active input method. */
+    private fun ensureWhisperActive(): Boolean {
+        return try {
+            val current = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) ?: ""
+            if (current.equals(WHISPER_IME, ignoreCase = true)) return true
+            getSharedPreferences("whisper", MODE_PRIVATE).edit().putString("prev_ime", current).apply()
+            try {
+                Settings.Secure.putString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD, WHISPER_IME)
+                true
+            } catch (e: SecurityException) {
+                AppLog.w("QuickSwitch", "cannot auto-switch (no WRITE_SECURE_SETTINGS)")
+                false
+            }
+        } catch (e: Exception) { false }
     }
 
     private fun finishPtt(model: String, lang: String) {
@@ -230,16 +249,7 @@ class QuickSwitchService : Service() {
                                 toast(if (raw.startsWith("ERROR")) "Failed: $raw" else "No speech detected")
                             else -> {
                                 val capped = WhisperKeyboardService.capsFn?.invoke(raw) ?: raw
-                                val ic = WhisperKeyboardService.activeIC
-                                if (ic != null) {
-                                    ic.commitText("$capped ", 1)
-                                    toast("Typed: ${capped.take(50)}")
-                                    AppLog.i("QuickSwitch", "PTT typed: ${capped.take(60)}")
-                                } else {
-                                    saveTxt(capped)
-                                    toast("Saved to TXT (open Whisper keyboard to type)")
-                                    AppLog.i("QuickSwitch", "PTT saved txt: ${capped.take(60)}")
-                                }
+                                commitWhenReady(capped, 0)
                             }
                         }
                     }
@@ -247,6 +257,22 @@ class QuickSwitchService : Service() {
                 onError = { err -> handler.post { toast("Transcription failed - Retry Failed in app"); AppLog.e("QuickSwitch", "PTT failed: $err") } }
             )
         )
+    }
+
+    /** Wait up to ~4s for the Whisper IME to bind to the field, then type; fallback TXT. */
+    private fun commitWhenReady(text: String, attempt: Int) {
+        val ic = WhisperKeyboardService.activeIC
+        if (ic != null) {
+            ic.commitText("$text ", 1)
+            toast("Typed: ${text.take(50)}")
+            AppLog.i("QuickSwitch", "PTT typed: ${text.take(60)}")
+        } else if (attempt < 8) {
+            handler.postDelayed({ commitWhenReady(text, attempt + 1) }, 500)
+        } else {
+            saveTxt(text)
+            toast("Saved to TXT (Whisper keyboard not active)")
+            AppLog.i("QuickSwitch", "PTT saved txt: ${text.take(60)}")
+        }
     }
 
     private fun saveTxt(text: String) {

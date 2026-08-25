@@ -609,6 +609,12 @@ class WhisperKeyboardService : InputMethodService() {
         tvQueueBadge?.postDelayed(badgeRefresh, 1200)
     }
 
+    override fun onStartInput(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
+        super.onStartInput(info, restarting)
+        // field focused - expose connection even before the keyboard view shows
+        activeIC = currentInputConnection
+    }
+
     override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         // expose input connection for push-to-talk from the mic bubble
