@@ -58,12 +58,19 @@ object AudioUtils {
     }
 
     fun isNoSpeechText(text: String): Boolean {
-        val t = text.trim().lowercase()
+        var t = text.trim().lowercase()
         if (t.isEmpty()) return true
-        val garbage = listOf("[blank]", "(blank)", "[silence]", "(silence)", "[music]", "[inaudible]", "[noise]")
+        // strip bracket/paren decorations whisper adds for non-speech events
+        t = t.replace(Regex("[\\[\\](){}]"), "").trim()
+        val garbage = listOf(
+            "blank", "blank audio", "silence", "[silence]", "music", "inaudible",
+            "inaudible speech", "noise", "background noise", "static", "quiet",
+            "you", "thank you.", ".", ".."
+        )
         if (t in garbage) return true
-        // single-char punctuation only
         if (t.length <= 2 && t.all { it in ".,!?-_:;()[]{}" }) return true
+        // e.g. "...", "-", "♪", repeated punctuation only
+        if (t.isNotEmpty() && t.all { it in ".,!?-_:;()[]{}♪~ " }) return true
         return false
     }
 

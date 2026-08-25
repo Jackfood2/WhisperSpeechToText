@@ -11,7 +11,7 @@
             <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="18dp" android:gravity="center_vertical">
                 <LinearLayout android:orientation="vertical" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content">
                     <TextView android:text="Whisper Speech to Text" android:textSize="23sp" android:textStyle="bold" android:textColor="#FFFFFF" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                    <TextView android:text="Offline • Private • On-device Whisper  •  S23 FE optimized" android:textSize="13sp" android:textColor="#FFFFFF" android:alpha="0.95" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                    <TextView android:text="Offline • Private • On-device Whisper  •  Optimized for Android" android:textSize="13sp" android:textColor="#FFFFFF" android:alpha="0.95" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
                     <TextView android:text="Tip: adjust everything in ⚙ Settings." android:textSize="12sp" android:textColor="#FFFFFF" android:alpha="0.9" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"/>
                 </LinearLayout>
                 <com.google.android.material.button.MaterialButton android:id="@+id/btnOpenSettings" android:text="⚙ Settings" android:textSize="14sp" android:textStyle="bold" android:textColor="#4527A0" app:backgroundTint="#FFFFFF" app:iconTint="#4527A0" android:layout_width="wrap_content" android:layout_height="44dp" android:paddingStart="14dp" android:paddingEnd="14dp" android:insetTop="0dp" android:insetBottom="0dp" android:contentDescription="Settings"/>
@@ -80,3 +80,4 @@
         <TextView android:text="Tip: In any app, select Whisper Speech to Text, tap Speak, talk, tap Stop. LIVE shows preview via composing text. VAD auto-stops on silence." android:textSize="12sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:paddingBottom="12dp"/>
     </LinearLayout>
 </ScrollView>
+

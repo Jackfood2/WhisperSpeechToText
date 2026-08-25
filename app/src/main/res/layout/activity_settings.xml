@@ -50,6 +50,26 @@
                     <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchBt" android:text="Bluetooth mic" android:textSize="13sp" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
                     <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchCaps" android:text="Auto caps" android:textSize="13sp" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:checked="true"/>
                 </LinearLayout>
+
+                <TextView android:id="@+id/tvCores" android:text="CPU cores detected" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp"/>
+                <Spinner android:id="@+id/spinnerThreads" android:layout_width="match_parent" android:layout_height="44dp" android:background="#FFFFFF" android:popupBackground="#FFFFFF" android:layout_marginTop="4dp"/>
+
+                <TextView android:text="Pause that ends a chunk" android:textStyle="bold" android:textSize="13sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp"/>
+                <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                    <SeekBar android:id="@+id/seekChunkSilence" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="19"/>
+                    <TextView android:id="@+id/tvChunkSilence" android:text="4.5s" android:textStyle="bold" android:textColor="#212121" android:textSize="13sp" android:layout_width="52dp" android:layout_height="wrap_content" android:gravity="end"/>
+                </LinearLayout>
+                <TextView android:text="Chunk length (grows automatically while previous chunk is still processing)" android:textStyle="bold" android:textSize="13sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+                <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                    <SeekBar android:id="@+id/seekChunkLength" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:min="1" android:max="45"/>
+                    <TextView android:id="@+id/tvChunkLength" android:text="30s" android:textStyle="bold" android:textColor="#212121" android:textSize="13sp" android:layout_width="52dp" android:layout_height="wrap_content" android:gravity="end"/>
+                </LinearLayout>
+                <TextView android:text="Auto-stop recording after silence (VAD ON)" android:textStyle="bold" android:textSize="13sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
+                <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                    <SeekBar android:id="@+id/seekStopSilence" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:min="5" android:max="60"/>
+                    <TextView android:id="@+id/tvStopSilence" android:text="10s" android:textStyle="bold" android:textColor="#212121" android:textSize="13sp" android:layout_width="40dp" android:layout_height="wrap_content" android:gravity="end"/>
+                </LinearLayout>
+                <TextView android:text="Shorter pause = faster text delivery. Applies to the next recording." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"/>
                 <TextView android:text="VAD: silence 1.3s → auto Stop. LIVE: composing preview while speaking. BT: VOICE_COMMUNICATION." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

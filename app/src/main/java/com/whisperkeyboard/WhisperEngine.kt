@@ -26,7 +26,26 @@ object WhisperEngine {
     private external fun nativeInit(modelPath: String): Long
     private external fun nativeFree()
     private external fun nativeCancel()
+    private external fun nativeSetThreads(threads: Int)
     private external fun nativeTranscribe(modelPath: String, wavPath: String, lang: String): String
+
+    /** Set whisper thread count (takes effect on next transcription). */
+    fun setThreads(threads: Int) {
+        try { nativeSetThreads(threads) } catch (e: Throwable) { AppLog.w(TAG, "setThreads: ${e.message}") }
+    }
+
+    /** Read user pref and apply. "auto" adapts to the device: 8+ cores=6, 4+=4, else cores. */
+    fun applyThreadPref(ctx: android.content.Context?): Int {
+        if (ctx == null) return 4
+        val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        val pref = ctx.getSharedPreferences("whisper", android.content.Context.MODE_PRIVATE).getString("threads_mode", "auto") ?: "auto"
+        val n = if (pref == "auto") {
+            if (cores >= 8) 6 else if (cores >= 4) 4 else cores
+        } else pref.toIntOrNull()?.coerceIn(1, cores) ?: 4
+        setThreads(n)
+        AppLog.i(TAG, "threads=$n (${cores} cores detected, mode=$pref)")
+        return n
+    }
 
     /** Abort the in-flight transcription ASAP (progress callback returns abort). */
     fun cancelCurrent() {
@@ -51,9 +70,11 @@ object WhisperEngine {
                     val handle = try { nativeInit(modelPath) } catch (e: Throwable) { AppLog.e(TAG, "nativeInit threw: ${e.message}"); -1L }
                     val ms = System.currentTimeMillis() - t0
                     if (handle > 0) {
+                        val wasReload = loadedPath != modelPath
                         loadedPath = modelPath
                         lastError = ""
                         AppLog.i(TAG, "load OK ($ms ms, attempt $attempt): ${f.name}")
+                        if (wasReload) ModelNotifier.loaded(f.name, f.length() / 1024 / 1024)
                         return true
                     }
                     lastMsg = "init returned $handle after $ms ms"
@@ -87,6 +108,7 @@ object WhisperEngine {
                 nativeFree()
                 loadedPath = null
                 AppLog.i(TAG, "unloaded ${was?.substringAfterLast('/') ?: "-"}")
+                ModelNotifier.unloaded(was?.substringAfterLast('/'))
                 true
             } catch (e: Throwable) {
                 AppLog.w(TAG, "unload failed: ${e.message}")

@@ -1,4 +1,4 @@
-﻿package com.whisperkeyboard
+package com.whisperkeyboard
 
 import android.content.Intent
 import android.os.Bundle
@@ -63,6 +63,74 @@ class SettingsActivity : AppCompatActivity() {
         swLive.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("live_on", b).apply() }
         swBt.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("bt_mic", b).apply() }
         swCaps.setOnCheckedChangeListener { _, b -> prefs.edit().putString("caps_mode", if (b) "auto" else "off").apply() }
+
+        // ---- Threads (CPU cores) ----
+        val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        findViewById<TextView>(R.id.tvCores).text = "Transcription threads  •  $cores CPU cores detected"
+        val threadOptions = mutableListOf("Auto (${cores.coerceIn(2, 4)})")
+        for (i in 1..cores) threadOptions.add("$i")
+        val thAdapter = ArrayAdapter(this, R.layout.spinner_item, threadOptions)
+        thAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
+        val spinnerThreads = findViewById<Spinner>(R.id.spinnerThreads)
+        spinnerThreads.adapter = thAdapter
+        val savedThreads = prefs.getString("threads_mode", "auto") ?: "auto"
+        spinnerThreads.setSelection(if (savedThreads == "auto") 0 else savedThreads.toIntOrNull()?.coerceIn(1, cores) ?: 4.coerceAtMost(cores))
+        spinnerThreads.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) {
+                val mode = if (pos == 0) "auto" else threadOptions[pos]
+                prefs.edit().putString("threads_mode", mode).apply()
+                val n = WhisperEngine.applyThreadPref(this@SettingsActivity)
+                Toast.makeText(this@SettingsActivity, "Whisper will use $n threads", Toast.LENGTH_SHORT).show()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+
+        // ---- VAD durations ----
+        val seekChunkSilence = findViewById<SeekBar>(R.id.seekChunkSilence)
+        val tvChunkSilence = findViewById<TextView>(R.id.tvChunkSilence)
+        // stored in tenths of a second (min 0.5s, step 0.5s); migrate from old whole-second key
+        val legacyS = prefs.getInt("vad_chunk_silence_s", -1)
+        val savedDs = prefs.getInt("vad_chunk_silence_ds", if (legacyS >= 2) legacyS * 10 else 40).coerceIn(5, 100)
+        seekChunkSilence.progress = savedDs / 5 - 1   // progress 0..19 -> 0.5..10.0s (step 0.5)
+        tvChunkSilence.text = String.format("%.1fs", savedDs / 10f)
+        seekChunkSilence.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                val ds = (p + 1) * 5
+                tvChunkSilence.text = String.format("%.1fs", ds / 10f)
+                if (fromUser) prefs.edit().putInt("vad_chunk_silence_ds", ds).apply()
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+
+        // chunk length (seconds)
+        val seekLen = findViewById<SeekBar>(R.id.seekChunkLength)
+        val tvLen = findViewById<TextView>(R.id.tvChunkLength)
+        val savedLen = prefs.getInt("chunk_target_s", 30).coerceIn(1, 45)
+        seekLen.progress = savedLen
+        tvLen.text = "${savedLen}s"
+        seekLen.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                tvLen.text = "${p}s"
+                if (fromUser) prefs.edit().putInt("chunk_target_s", p.coerceIn(1, 45)).apply()
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+
+        val seekStopSilence = findViewById<SeekBar>(R.id.seekStopSilence)
+        val tvStopSilence = findViewById<TextView>(R.id.tvStopSilence)
+        val savedStopS = prefs.getInt("vad_stop_silence_s", 10).coerceIn(5, 60)
+        seekStopSilence.progress = savedStopS
+        tvStopSilence.text = "${savedStopS}s"
+        seekStopSilence.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                tvStopSilence.text = "${p}s"
+                if (fromUser) prefs.edit().putInt("vad_stop_silence_s", p).apply()
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
 
         spinnerModel.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) {

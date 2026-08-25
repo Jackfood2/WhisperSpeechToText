@@ -25,10 +25,25 @@ object TextRouter {
     /** Route text; returns immediately, retries in background until typed or timeout. */
     fun route(text: String) {
         if (text.isEmpty()) return
+        // blank/silence chunk: discard silently, but watch for "forgot to stop recording"
+        if (AudioUtils.isNoSpeechText(text)) {
+            val streak = blankStreak.incrementAndGet()
+            AppLog.i(TAG, "blank chunk discarded (streak=$streak)")
+            if (streak >= 3) {
+                blankStreak.set(0)
+                WhisperKeyboardService.stopHook?.invoke()
+                toastIt("No speech in 3 chunks - recording auto-stopped. Tap mic to resume.")
+                AppLog.w(TAG, "auto-stop: 3 consecutive blank chunks")
+            }
+            return
+        }
+        blankStreak.set(0)
         pendingTyping.incrementAndGet()
         ProcessingService.notifyActivity()
         tryRoute(text, 0)
     }
+
+    private val blankStreak = AtomicInteger(0)
     private fun finish() {
         val left = pendingTyping.decrementAndGet()
         if (left <= 0) ProcessingService.notifyIdle()

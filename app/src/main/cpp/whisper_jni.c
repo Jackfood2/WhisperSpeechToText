@@ -1,4 +1,4 @@
-﻿#include <jni.h>
+#include <jni.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -13,6 +13,17 @@
 static struct whisper_context *g_ctx = NULL;
 static char g_model_path[1024] = {0};
 static volatile int g_cancel = 0;
+static int g_threads = 4;
+
+JNIEXPORT void JNICALL
+Java_com_whisperkeyboard_WhisperEngine_nativeSetThreads(
+    JNIEnv *env, jobject thiz, jint threads)
+{
+    if (threads > 0 && threads <= 32) {
+        g_threads = (int)threads;
+        LOGI("threads set to %d", g_threads);
+    }
+}
 
 // Abort hooks - whisper_full checks these during compute; return true to cancel
 static bool abort_cb(void * user_data)
@@ -216,7 +227,7 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
     params.translate = false;
     params.single_segment = false;
     params.no_context = true;
-    params.n_threads = 4;
+    params.n_threads = g_threads;
     params.abort_callback = abort_cb;
     params.abort_callback_user_data = NULL;
     params.encoder_begin_callback = encoder_begin_cb;
