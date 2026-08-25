@@ -73,7 +73,7 @@ class QuickSwitchService : Service() {
         androidx.core.app.NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("Whisper mic bubble")
-            .setContentText("Tap: switch keyboard • Hold: talk")
+            .setContentText("Tap: switch keyboard. Hold: talk.")
             .setOngoing(true)
             .setPriority(androidx.core.app.NotificationCompat.PRIORITY_MIN)
             .build()
@@ -94,7 +94,7 @@ class QuickSwitchService : Service() {
             canvas.drawCircle(width / 2f, height / 2f, r, if (pttRecording) recPaint else greyPaint)
             canvas.drawCircle(width / 2f, height / 2f, r, ringPaint)
             val y = height / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
-            canvas.drawText("🎤", width / 2f, y, textPaint)
+            canvas.drawText("\uD83C\uDFA4", width / 2f, y, textPaint)
         }
     }
 
@@ -237,7 +237,7 @@ class QuickSwitchService : Service() {
         pcm.delete()
         TranscriptionQueue.enqueue(
             TranscriptionQueue.Job(
-                context = this,
+                context = applicationContext,
                 wavFile = wav,
                 model = model,
                 lang = lang,

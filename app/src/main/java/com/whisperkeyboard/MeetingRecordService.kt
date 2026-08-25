@@ -194,7 +194,7 @@ class MeetingRecordService : Service() {
 
             TranscriptionQueue.enqueue(
                 TranscriptionQueue.Job(
-                    context = this,
+                    context = applicationContext,
                     wavFile = wavFile,
                     model = model,
                     lang = lang,

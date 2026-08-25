@@ -68,14 +68,14 @@ object TextRouter {
         if (ic != null && pm?.isInteractive != false) {
             ic.commitText("$capped ", 1)
             AppLog.i(TAG, "typed via IME: ${capped.take(50)}")
-            toastIt("✓ ${capped.take(40)}")
+            toastIt("Typed: ${capped.take(40)}")
             finish()
             return
         }
         // 2) accessibility paste - works with ANY keyboard in use (not on lock screen)
         if (!locked && attempt >= 2 && WhisperAccessibilityService.paste("$capped ")) {
             AppLog.i(TAG, "pasted via a11y: ${capped.take(50)}")
-            toastIt("✓ pasted ${capped.take(40)}")
+            toastIt("Typed: ${capped.take(40)}")
             finish()
             return
         }

@@ -38,7 +38,7 @@ class ImeRecordService : Service() {
             .setSmallIcon(android.R.drawable.presence_audio_online)
             .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .addAction(0, "■ Stop Recording", stopIntent)
+            .addAction(0, "Stop Recording", stopIntent)
             .build()
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

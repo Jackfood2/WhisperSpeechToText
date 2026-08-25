@@ -34,6 +34,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private val models = arrayOf("tiny", "base", "small", "medium")
     private val langs = arrayOf("auto", "en", "zh", "ja", "ko", "fr", "de", "es")
+    private val langNames = arrayOf("Auto detect", "English", "Chinese", "Japanese", "Korean", "French", "German", "Spanish")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,7 +49,7 @@ class SettingsActivity : AppCompatActivity() {
         val modelAdapter = ArrayAdapter(this, R.layout.spinner_item, models)
         modelAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
         spinnerModel.adapter = modelAdapter
-        val langAdapter = ArrayAdapter(this, R.layout.spinner_item, langs)
+        val langAdapter = ArrayAdapter(this, R.layout.spinner_item, langNames)
         langAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
         spinnerLang.adapter = langAdapter
 
@@ -72,7 +73,7 @@ class SettingsActivity : AppCompatActivity() {
 
         // ---- Threads (CPU cores) ----
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-        findViewById<TextView>(R.id.tvCores).text = "Transcription threads  •  $cores CPU cores detected"
+        findViewById<TextView>(R.id.tvCores).text = "Transcription threads | $cores CPU cores detected"
         val threadOptions = mutableListOf("Auto (${cores.coerceIn(2, 4)})")
         for (i in 1..cores) threadOptions.add("$i")
         val thAdapter = ArrayAdapter(this, R.layout.spinner_item, threadOptions)

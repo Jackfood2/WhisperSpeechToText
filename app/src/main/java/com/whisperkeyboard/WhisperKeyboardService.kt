@@ -95,7 +95,7 @@ class WhisperKeyboardService : InputMethodService() {
                 val m = getModel()
                 val mf = ModelManager.modelFile(this, m)
                 if (!mf.exists() || mf.length() < 1_000_000) {
-                    handler.post { updateStatus("$m model not downloaded - tap âš™ for help") }
+                    handler.post { updateStatus("$m model not downloaded - open app to download") }
                     AppLog.w(TAG, "preload($from): $m not downloaded")
                     return@Thread
                 }
@@ -103,7 +103,7 @@ class WhisperKeyboardService : InputMethodService() {
                     handler.post { updateStatus("Loading $m model...") }
                     WhisperEngine.applyThreadPref(this)
                     val ok = WhisperEngine.ensureModel(mf.absolutePath)
-                    handler.post { updateStatus(if (ok) "$m ready - tap the mic" else "Model load FAILED - see Dashboard log") }
+                    handler.post { updateStatus(if (ok) "$m ready - open app - the mic" else "Model load FAILED - see Dashboard log") }
                 }
             } catch (e: Throwable) { AppLog.e(TAG, "preload error: ${e.message}") }
         }.apply { isDaemon = true; name = "model-preload-$from"; start() }
@@ -159,7 +159,7 @@ class WhisperKeyboardService : InputMethodService() {
                 startActivity(i)
             } catch (_: Exception) {}
         }
-        // Backspace: tap deletes ONE character; hold deletes WORDS, accelerating over time
+        // Backspace: open app - deletes ONE character; hold deletes WORDS, accelerating over time
         btnBackspace?.setOnClickListener { try { currentInputConnection?.deleteSurroundingText(1, 0) } catch (_: Exception) {} }
         btnBackspace?.setOnTouchListener { v, ev ->
             when (ev.actionMasked) {
@@ -213,7 +213,7 @@ class WhisperKeyboardService : InputMethodService() {
             // confirm once the native abort has actually landed
             fun confirmStop(attempt: Int) {
                 if (!TranscriptionQueue.isActive() && !WhisperEngine.isBusy()) {
-                    updateStatus("Processing stopped ✓")
+                    updateStatus("Processing stopped")
                     Toast.makeText(this, "Processing stopped", Toast.LENGTH_SHORT).show()
                     AppLog.i(TAG, "force stop confirmed")
                 } else if (attempt < 20) handler.postDelayed({ confirmStop(attempt + 1) }, 150)
@@ -238,6 +238,8 @@ class WhisperKeyboardService : InputMethodService() {
     private fun isVadOn(): Boolean = prefs().getBoolean("vad_on", true)
     private fun isBtOn(): Boolean = prefs().getBoolean("bt_mic", false)
     private fun getCapsMode(): String = prefs().getString("caps_mode", "auto") ?: "auto"
+    private val langNames = arrayOf("Auto detect", "English", "Chinese", "Japanese", "Korean", "French", "German", "Spanish")
+    private val langCodes = arrayOf("auto", "en", "zh", "ja", "ko", "fr", "de", "es")
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         handler.post { refreshAllButtons() }
@@ -255,7 +257,7 @@ class WhisperKeyboardService : InputMethodService() {
                     if (pct in 1..99) tvStatus?.text = "Transcribing chunk... $cur/$total ($pct%)"
                 } else if (wasActive) {
                     // just finished - stop showing stale "Transcribing..."
-                    tvStatus?.text = if (isRecording.get()) "Listening - text appears as you pause" else "All chunks processed âœ“"
+                    tvStatus?.text = if (isRecording.get()) "Listening - text appears as you pause" else "All chunks processed"
                     tvPct?.text = "0%"
                     progressBar?.progress = 0
                 }
@@ -279,14 +281,14 @@ class WhisperKeyboardService : InputMethodService() {
         val thr = if (mode == "auto") (if (cores >= 8) 6 else if (cores >= 4) 4 else cores) else mode.toIntOrNull() ?: 4
         val parts = mutableListOf(
             getModel(),
-            "lang:${getLang()}",
+            "lang:" + (langNames.getOrNull(langCodes.indexOf(getLang()).coerceAtLeast(0)) ?: getLang()),
             "VAD ${"%.1f".format(chunkS)}s",
             if (isVadOn()) "auto-stop ${stopS}s" else "no auto-stop",
             if (isBtOn()) "BT mic" else null,
             "caps:${getCapsMode()}",
             "$thr threads"
         ).filterNotNull()
-        tvLabels?.text = parts.joinToString(" · ")
+        tvLabels?.text = parts.joinToString(" | ")
     }
 
     private fun setCircleVisual(recording: Boolean) {
@@ -299,7 +301,7 @@ class WhisperKeyboardService : InputMethodService() {
         val mode = getCapsMode()
         if (mode == "off") return text.lowercase()
         if (mode == "auto") return text
-        return text.split(Regex("(?<=[.!?])\\s+")).joinToString(" ") { s ->
+        return text.split(Regex("(?<=[.!?])\\s+")).joinToString(" | ") { s ->
             s.replaceFirstChar { if(it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
         }
     }
@@ -324,7 +326,7 @@ class WhisperKeyboardService : InputMethodService() {
         val selModel = getModel()
         val mf = ModelManager.modelFile(this, selModel)
         if (!mf.exists() || mf.length() < 1_000_000) {
-            updateStatus("$selModel not downloaded - open app, tap Download Model")
+            updateStatus("$selModel not downloaded - open app, open app - Download Model")
             Toast.makeText(this, "$selModel model missing - open the app to download it", Toast.LENGTH_LONG).show()
             return
         }
@@ -433,15 +435,15 @@ class WhisperKeyboardService : InputMethodService() {
         handler.post { Toast.makeText(this@WhisperKeyboardService, "Chunk %.0fs queued".format(sec), Toast.LENGTH_SHORT).show() }
         TranscriptionQueue.enqueue(
             TranscriptionQueue.Job(
-                context = this,
+                context = applicationContext,
                 wavFile = wav,
                 model = model,
                 lang = lang,
                 onResult = { text -> TextRouter.route(text.trim()) },
                 onError = { err ->
                     handler.post {
-                        updateStatus("Chunk failed - Retry Failed in âš™")
-                        Toast.makeText(this@WhisperKeyboardService, "A chunk failed - Retry Failed in âš™ settings", Toast.LENGTH_LONG).show()
+                        updateStatus("Chunk failed - use Retry Failed")
+                        Toast.makeText(this@WhisperKeyboardService, "A chunk failed - Retry Failed in app settings", Toast.LENGTH_LONG).show()
                         updateQueueBadge()
                     }
                     AppLog.e(TAG, "chunk failed: $err")
@@ -498,8 +500,8 @@ class WhisperKeyboardService : InputMethodService() {
     private fun updateOutstandingRow() {
         val n = OutstandingStore.count(this)
         rowOutstanding?.visibility = if (n > 0) View.VISIBLE else View.GONE
-        btnTypeOutstanding?.text = "ðŸ“¥ Type pending transcript ($n)"
-        if (n > 0) updateStatus("$n pending transcript(s) - tap the blue button to insert")
+        btnTypeOutstanding?.text = "Type pending transcript ($n)"
+        if (n > 0) updateStatus("$n pending transcript(s) - open app - the blue button to insert")
     }
 
     override fun onStartInput(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {

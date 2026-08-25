@@ -83,6 +83,7 @@ class ProcessingService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        lastStart = 0
         super.onDestroy()
     }
 

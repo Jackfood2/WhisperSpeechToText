@@ -16,7 +16,7 @@
         <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
                 <TextView android:text="Model  •  also on keyboard (tiny/base/small/medium)" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <Spinner android:id="@+id/spinnerModel" android:layout_width="match_parent" android:layout_height="48dp" android:background="#FFFFFF" android:popupBackground="#FFFFFF" android:layout_marginTop="8dp" android:padding="8dp"/>
+                <Spinner android:id="@+id/spinnerModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="#FFFFFF" android:popupBackground="#D9D9D9" android:layout_marginTop="8dp" android:padding="8dp"/>
                 <com.google.android.material.button.MaterialButton android:id="@+id/btnDownloadModel" android:text="Download Model" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
                 <com.google.android.material.button.MaterialButton android:id="@+id/btnTestModel" android:text="Load Model Test" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
                 <ProgressBar android:id="@+id/progressModel" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="10dp" android:visibility="gone" android:layout_marginTop="8dp"/>
@@ -31,7 +31,7 @@
         <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
                 <TextView android:text="Language" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <Spinner android:id="@+id/spinnerLang" android:layout_width="match_parent" android:layout_height="48dp" android:background="#FFFFFF" android:popupBackground="#FFFFFF" android:layout_marginTop="6dp" android:padding="8dp"/>
+                <Spinner android:id="@+id/spinnerLang" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="#FFFFFF" android:popupBackground="#D9D9D9" android:layout_marginTop="6dp" android:padding="8dp"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -52,7 +52,7 @@
                 </LinearLayout>
 
                 <TextView android:id="@+id/tvCores" android:text="CPU cores detected" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp"/>
-                <Spinner android:id="@+id/spinnerThreads" android:layout_width="match_parent" android:layout_height="44dp" android:background="#FFFFFF" android:popupBackground="#FFFFFF" android:layout_marginTop="4dp"/>
+                <Spinner android:id="@+id/spinnerThreads" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="#FFFFFF" android:popupBackground="#D9D9D9" android:layout_marginTop="4dp"/>
 
                 <TextView android:text="Pause that ends a chunk" android:textStyle="bold" android:textSize="13sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp"/>
                 <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
