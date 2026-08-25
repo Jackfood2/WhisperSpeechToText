@@ -32,6 +32,8 @@ class WhisperKeyboardService : InputMethodService() {
         @Volatile var capsFn: ((String) -> String)? = null
         /** Invoked by the recording notification's Stop action (works from lock screen). */
         @Volatile var stopHook: (() -> Unit)? = null
+        /** True while the IME itself is capturing audio (bubble must not steal the mic). */
+        @Volatile var imeRecording = false
 
         // chunk timing constants (user-adjustable values are read per-session in startRecording)
         const val VAD_THRESH = 0.018
@@ -333,6 +335,7 @@ class WhisperKeyboardService : InputMethodService() {
         // model file present but not in memory -> start recording NOW, load concurrently
         if (!WhisperEngine.isLoaded(mf.absolutePath)) preloadModel("startRecording")
         isRecording.set(true)
+        imeRecording = true
         startImeForeground()
         setCircleVisual(true)
         updateStatus("Listening - text appears as you pause")
@@ -410,6 +413,7 @@ class WhisperKeyboardService : InputMethodService() {
                 try { activeRecorder?.release() } catch (_: Exception) {}
                 activeRecorder = null
             } finally {
+                imeRecording = false
                 stopHook = null
                 handler.post {
                     resetMicButton()

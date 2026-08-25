@@ -57,7 +57,6 @@ class QuickSwitchService : Service() {
     @Volatile private var state = STATE_IDLE
     @Volatile private var recActive = false
     private var recThread: Thread? = null
-    private val recBuffer = ByteArrayOutputStream()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -140,12 +139,14 @@ class QuickSwitchService : Service() {
         var downX = 0f; var downY = 0f
         var startX = 0f; var startY = 0f
         var moved = false
+        var downAt = 0L
 
         btn.setOnTouchListener { v, ev ->
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = ev.rawX; downY = ev.rawY; startX = params.x.toFloat(); startY = params.y.toFloat()
                     moved = false
+                    downAt = android.os.SystemClock.uptimeMillis()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -158,7 +159,12 @@ class QuickSwitchService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (moved) v.performLongClick() else v.performClick()
+                    val heldLongEnough = android.os.SystemClock.uptimeMillis() - downAt >= 450
+                    when {
+                        !moved -> v.performClick()                       // tap: record toggle
+                        heldLongEnough && !recActive -> v.performLongClick() // deliberate long-press+drag: switch keyboard
+                        // short drag or drag-while-recording = just reposition, no action
+                    }
                     true
                 }
                 else -> false
@@ -181,6 +187,10 @@ class QuickSwitchService : Service() {
 
     private fun startRec() {
         if (recActive) return
+        if (WhisperKeyboardService.imeRecording) {
+            toast("Keyboard is already recording - stop it first")
+            return
+        }
         val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
         val model = prefs.getString("model", "small") ?: "small"
         val mf = ModelManager.modelFile(this, model)
@@ -205,6 +215,8 @@ class QuickSwitchService : Service() {
         val wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "Whisper:BubbleRec")
         wakeLock.acquire(30 * 60 * 1000L)
         val lang = prefs.getString("lang", "auto") ?: "auto"
+        // per-session buffer: a fast stop/start must never share audio with the dying session
+        val pcmChunk = ByteArrayOutputStream()
         recThread = Thread {
             var lastVoiceTime = 0L
             var chunkStartMs = 0L
@@ -228,11 +240,11 @@ class QuickSwitchService : Service() {
                         chunkStartMs = now
                     }
                     if (gotVoice) {
-                        synchronized(recBuffer) { recBuffer.write(buf, 0, n) }
+                        synchronized(pcmChunk) { pcmChunk.write(buf, 0, n) }
                         if (voiced) lastVoiceTime = now
                         val silenceFor = now - lastVoiceTime
                         val durMs = now - chunkStartMs
-                        val hasContent = recBuffer.size() >= MIN_CHUNK_BYTES // >=0.5s of audio
+                        val hasContent = pcmChunk.size() >= MIN_CHUNK_BYTES // >=0.5s of audio
                         val closeChunk = when {
                             !hasContent -> false
                             silenceFor >= CHUNK_SILENCE_MS || durMs >= CHUNK_TARGET_MS -> true
@@ -240,20 +252,21 @@ class QuickSwitchService : Service() {
                             else -> false
                         }
                         if (closeChunk) {
-                            flushChunk(recBuffer, model, lang)
-                            synchronized(recBuffer) { recBuffer.reset() }
+                            flushChunk(pcmChunk, model, lang)
+                            synchronized(pcmChunk) { pcmChunk.reset() }
                             chunkStartMs = now
                             lastVoiceTime = now
                         }
                     }
                 }
                 try { rec.stop(); rec.release() } catch (_: Exception) {}
-                flushChunk(recBuffer, model, lang) // final partial chunk
+                flushChunk(pcmChunk, model, lang) // final partial chunk
                 finalFlushPending = false
             } catch (e: Throwable) {
                 AppLog.e("Bubble", "rec error: ${e.message}")
                 handler.post { toast("Mic error: ${e.message}") }
             } finally {
+                finalFlushPending = false // crash-safe: never leave the watcher stuck
                 try { wakeLock.release() } catch (_: Exception) {}
                 handler.post {
                     if (state == STATE_REC) enterProcessing()
