@@ -326,10 +326,12 @@ class WhisperKeyboardService : InputMethodService() {
         val selModel = getModel()
         val mf = ModelManager.modelFile(this, selModel)
         if (!mf.exists() || mf.length() < 1_000_000) {
-            updateStatus("$selModel not downloaded - open app, open app - Download Model")
+            updateStatus("$selModel not downloaded - open app, tap Download Model")
             Toast.makeText(this, "$selModel model missing - open the app to download it", Toast.LENGTH_LONG).show()
             return
         }
+        // model file present but not in memory -> start recording NOW, load concurrently
+        if (!WhisperEngine.isLoaded(mf.absolutePath)) preloadModel("startRecording")
         isRecording.set(true)
         startImeForeground()
         setCircleVisual(true)

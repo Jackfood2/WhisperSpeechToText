@@ -189,6 +189,13 @@ class QuickSwitchService : Service() {
             return
         }
         ensureWhisperActive() // best effort so delivery can type directly
+        // start recording NOW; load the model concurrently (first chunk waits in queue)
+        if (!WhisperEngine.isLoaded(mf.absolutePath)) {
+            Thread {
+                WhisperEngine.applyThreadPref(this)
+                WhisperEngine.ensureModel(mf.absolutePath)
+            }.apply { isDaemon = true; name = "bubble-model-load"; start() }
+        }
         recActive = true
         setState(STATE_REC, null)
         toast("Recording started - tap to stop")
@@ -242,6 +249,7 @@ class QuickSwitchService : Service() {
                 }
                 try { rec.stop(); rec.release() } catch (_: Exception) {}
                 flushChunk(recBuffer, model, lang) // final partial chunk
+                finalFlushPending = false
             } catch (e: Throwable) {
                 AppLog.e("Bubble", "rec error: ${e.message}")
                 handler.post { toast("Mic error: ${e.message}") }
@@ -254,10 +262,13 @@ class QuickSwitchService : Service() {
         }.apply { isDaemon = true; name = "bubble-rec"; start() }
     }
 
+    @Volatile private var finalFlushPending = false
+
     private fun stopRec() {
         if (!recActive) return
         recActive = false
-        toast("Recording stopped - processing...")
+        finalFlushPending = true
+        setState(STATE_PROC, "Recording stopped - processing...")
         AppLog.i("Bubble", "recording stopped by tap")
     }
 
@@ -269,7 +280,7 @@ class QuickSwitchService : Service() {
     /** Yellow until every chunk is transcribed AND delivered (typed or parked). */
     private fun watchCompletion(attempt: Int = 0) {
         if (state != STATE_PROC) return // a new recording took over
-        val busy = TranscriptionQueue.isActive() || TextRouter.pendingTypingCount() > 0
+        val busy = TranscriptionQueue.isActive() || TextRouter.pendingTypingCount() > 0 || finalFlushPending
         if (busy) {
             handler.postDelayed({ watchCompletion(attempt + 1) }, 500)
         } else {
