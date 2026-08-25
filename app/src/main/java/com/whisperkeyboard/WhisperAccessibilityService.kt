@@ -20,7 +20,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         fun paste(text: String): Boolean {
             val svc = instance ?: return false
             return try {
-                val root = svc.rootInActiveWindow ?: return false
+                val root = svc.rootInActiveWindow ?: findFromWindows(svc) ?: return false
                 val node = findEditable(root) ?: return false
                 val cm = svc.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 cm.setPrimaryClip(ClipData.newPlainText("whisper", text))
@@ -32,11 +32,23 @@ class WhisperAccessibilityService : AccessibilityService() {
             }
         }
 
+        private fun findFromWindows(svc: WhisperAccessibilityService): AccessibilityNodeInfo? {
+            return try {
+                for (w in svc.windows) {
+                    val r = w.root ?: continue
+                    val found = findEditable(r)
+                    if (found != null) return found
+                }
+                null
+            } catch (_: Exception) { null }
+        }
+
         private fun findEditable(node: AccessibilityNodeInfo?, depth: Int = 0): AccessibilityNodeInfo? {
             if (node == null || depth > 30) return null
-            if (node.isEditable) return node
+            if (node.isEditable && node.isEnabled) return node
             for (i in 0 until node.childCount) {
-                val found = findEditable(node.getChild(i), depth + 1)
+                val child = try { node.getChild(i) } catch (_: Exception) { null } ?: continue
+                val found = findEditable(child, depth + 1)
                 if (found != null) return found
             }
             return null

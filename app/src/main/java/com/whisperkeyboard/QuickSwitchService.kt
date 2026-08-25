@@ -44,6 +44,7 @@ class QuickSwitchService : Service() {
         const val CHUNK_SILENCE_MS = 4000L
         const val CHUNK_TARGET_MS = 30_000L
         const val CHUNK_HARD_CAP_MS = 45_000L
+        const val MIN_CHUNK_BYTES = 16000      // >=0.5s of audio before a chunk may close
         const val STATE_IDLE = 0
         const val STATE_REC = 1
         const val STATE_PROC = 2
@@ -125,7 +126,9 @@ class QuickSwitchService : Service() {
         val params = WindowManager.LayoutParams(
             sizePx, sizePx,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    or WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                    or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
@@ -190,10 +193,15 @@ class QuickSwitchService : Service() {
         setState(STATE_REC, null)
         toast("Recording started - tap to stop")
         AppLog.i("Bubble", "recording started")
+        // keep CPU alive while locked so recording never stalls
+        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        val wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "Whisper:BubbleRec")
+        wakeLock.acquire(30 * 60 * 1000L)
         val lang = prefs.getString("lang", "auto") ?: "auto"
         recThread = Thread {
-            var lastVoiceTime = System.currentTimeMillis()
-            var chunkStartMs = System.currentTimeMillis()
+            var lastVoiceTime = 0L
+            var chunkStartMs = 0L
+            var gotVoice = false
             try {
                 val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
                 val rec = AudioRecord(MediaRecorder.AudioSource.MIC, 16000, AudioFormat.CHANNEL_IN_MONO,
@@ -203,24 +211,33 @@ class QuickSwitchService : Service() {
                 while (recActive) {
                     val n = rec.read(buf, 0, buf.size)
                     if (n <= 0) break
-                    synchronized(recBuffer) { recBuffer.write(buf, 0, n) }
                     val rms = AudioUtils.rms16(buf, n)
                     val now = System.currentTimeMillis()
-                    if (rms > WhisperKeyboardService.VAD_THRESH) lastVoiceTime = now
-                    val silenceFor = now - lastVoiceTime
-                    val durMs = now - chunkStartMs
-                    val hasContent = recBuffer.size() > 1800
-                    val closeChunk = when {
-                        !hasContent -> false
-                        silenceFor >= CHUNK_SILENCE_MS || durMs >= CHUNK_TARGET_MS -> true
-                        durMs >= CHUNK_HARD_CAP_MS -> true
-                        else -> false
-                    }
-                    if (closeChunk) {
-                        flushChunk(recBuffer, model, lang)
-                        synchronized(recBuffer) { recBuffer.reset() }
-                        chunkStartMs = now
+                    val voiced = rms > WhisperKeyboardService.VAD_THRESH
+                    // ignore leading dead air: only buffer after the first real voice
+                    if (!gotVoice && voiced) {
+                        gotVoice = true
                         lastVoiceTime = now
+                        chunkStartMs = now
+                    }
+                    if (gotVoice) {
+                        synchronized(recBuffer) { recBuffer.write(buf, 0, n) }
+                        if (voiced) lastVoiceTime = now
+                        val silenceFor = now - lastVoiceTime
+                        val durMs = now - chunkStartMs
+                        val hasContent = recBuffer.size() >= MIN_CHUNK_BYTES // >=0.5s of audio
+                        val closeChunk = when {
+                            !hasContent -> false
+                            silenceFor >= CHUNK_SILENCE_MS || durMs >= CHUNK_TARGET_MS -> true
+                            durMs >= CHUNK_HARD_CAP_MS -> true
+                            else -> false
+                        }
+                        if (closeChunk) {
+                            flushChunk(recBuffer, model, lang)
+                            synchronized(recBuffer) { recBuffer.reset() }
+                            chunkStartMs = now
+                            lastVoiceTime = now
+                        }
                     }
                 }
                 try { rec.stop(); rec.release() } catch (_: Exception) {}
@@ -229,6 +246,7 @@ class QuickSwitchService : Service() {
                 AppLog.e("Bubble", "rec error: ${e.message}")
                 handler.post { toast("Mic error: ${e.message}") }
             } finally {
+                try { wakeLock.release() } catch (_: Exception) {}
                 handler.post {
                     if (state == STATE_REC) enterProcessing()
                 }
@@ -260,10 +278,23 @@ class QuickSwitchService : Service() {
         }
     }
 
-    /** Write one chunk WAV and enqueue; delivery handled by TextRouter. */
+    /** Write one chunk WAV and enqueue; delivery handled by TextRouter. Silent chunks are dropped. */
     private fun flushChunk(buffer: ByteArrayOutputStream, model: String, lang: String) {
         val bytes = synchronized(buffer) { buffer.toByteArray() }
-        if (bytes.size <= 1800) return
+        if (bytes.size < MIN_CHUNK_BYTES) return
+        // quick silence check - discard dead-air chunks without wasting transcription
+        var peak = 0
+        var i = 0
+        while (i + 1 < bytes.size) {
+            val sample = kotlin.math.abs(((bytes[i].toInt() and 0xFF) or (bytes[i + 1].toInt() shl 8)).toShort().toInt())
+            if (sample > peak) peak = sample
+            i += 2
+        }
+        if (peak < 400) { // ~1.2% of full scale -> effectively silence
+            AppLog.i("Bubble", "silent chunk dropped (peak=$peak)")
+            toast("Empty chunk ignored")
+            return
+        }
         val ts = System.currentTimeMillis()
         val pcm = File(cacheDir, "bubble_$ts.pcm")
         FileOutputStream(pcm).use { it.write(bytes) }
@@ -295,7 +326,11 @@ class QuickSwitchService : Service() {
         ProcessingService.notifyActivity()
     }
 
-    private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
+    private fun toast(msg: String) {
+        handler.post {
+            try { android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show() } catch (_: Exception) {}
+        }
+    }
 
     /** Best-effort: make Whisper the active IME so delivery can type directly (needs WRITE_SECURE_SETTINGS). */
     private fun ensureWhisperActive(): Boolean {

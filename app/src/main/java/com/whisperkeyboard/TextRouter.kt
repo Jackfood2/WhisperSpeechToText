@@ -57,7 +57,7 @@ object TextRouter {
             val ctx = WhisperApp.holder
             if (ctx != null) {
                 OutstandingStore.add(ctx, text)
-                toastIt("Held (${OutstandingStore.count(ctx)} waiting) - refocus a field to type")
+                toastIt("Held (${OutstandingStore.count(ctx)}) + copied to clipboard - refocus a field to type")
             }
             finish()
             return
@@ -73,11 +73,18 @@ object TextRouter {
             return
         }
         // 2) accessibility paste - works with ANY keyboard in use (not on lock screen)
-        if (!locked && attempt >= 2 && WhisperAccessibilityService.paste("$capped ")) {
-            AppLog.i(TAG, "pasted via a11y: ${capped.take(50)}")
-            toastIt("Typed: ${capped.take(40)}")
-            finish()
-            return
+        if (!locked && attempt >= 2) {
+            val ok = WhisperAccessibilityService.paste("$capped ")
+            if (ok) {
+                AppLog.i(TAG, "pasted via a11y: ${capped.take(50)}")
+                toastIt("Typed: ${capped.take(40)}")
+                finish()
+                return
+            }
+            // one-time guidance when the bridge is off and another keyboard owns the field
+            if (attempt == 8 && !WhisperAccessibilityService.isReady()) {
+                toastIt("Enable 'Whisper Typing Bridge' in Accessibility to type here")
+            }
         }
         // 3) keep retrying (screen may unlock; keyboard may bind shortly)
         handler.postDelayed({ tryRoute(text, attempt + 1) }, 500)
