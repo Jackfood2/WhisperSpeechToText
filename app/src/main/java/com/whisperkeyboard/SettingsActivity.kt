@@ -71,6 +71,13 @@ class SettingsActivity : AppCompatActivity() {
         swBt.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("bt_mic", b).apply(); saved() }
         swCaps.setOnCheckedChangeListener { _, b -> prefs.edit().putString("caps_mode", if (b) "auto" else "off").apply(); saved() }
 
+        val swImeChunked = findViewById<SwitchMaterial>(R.id.switchImeChunked)
+        val swBubbleChunked = findViewById<SwitchMaterial>(R.id.switchBubbleChunked)
+        swImeChunked.isChecked = prefs.getBoolean("ime_chunked", true)
+        swBubbleChunked.isChecked = prefs.getBoolean("bubble_chunked", true)
+        swImeChunked.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("ime_chunked", b).apply(); saved(); Toast.makeText(this, if (b) "Keyboard: chunked ON" else "Keyboard: whole audio on Stop", Toast.LENGTH_SHORT).show() }
+        swBubbleChunked.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("bubble_chunked", b).apply(); saved(); Toast.makeText(this, if (b) "Bubble: chunked ON" else "Bubble: whole audio on Stop", Toast.LENGTH_SHORT).show() }
+
         // ---- Threads (CPU cores) ----
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
         findViewById<TextView>(R.id.tvCores).text = "Transcription threads | $cores CPU cores detected"

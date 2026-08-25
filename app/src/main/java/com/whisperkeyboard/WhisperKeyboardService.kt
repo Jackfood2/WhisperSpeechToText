@@ -281,6 +281,7 @@ class WhisperKeyboardService : InputMethodService() {
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
         val mode = p.getString("threads_mode", "auto") ?: "auto"
         val thr = if (mode == "auto") (if (cores >= 8) 6 else if (cores >= 4) 4 else cores) else mode.toIntOrNull() ?: 4
+        val chunkedKb = if (p.getBoolean("ime_chunked", true)) "chunked" else "whole"
         val parts = mutableListOf(
             getModel(),
             "lang:" + (langNames.getOrNull(langCodes.indexOf(getLang()).coerceAtLeast(0)) ?: getLang()),
@@ -288,6 +289,7 @@ class WhisperKeyboardService : InputMethodService() {
             if (isVadOn()) "auto-stop ${stopS}s" else "no auto-stop",
             if (isBtOn()) "BT mic" else null,
             "caps:${getCapsMode()}",
+            chunkedKb,
             "$thr threads"
         ).filterNotNull()
         tvLabels?.text = parts.joinToString(" | ")
@@ -351,6 +353,7 @@ class WhisperKeyboardService : InputMethodService() {
             var chunkStartMs = System.currentTimeMillis()
             val recordStartMs = chunkStartMs
             val vadOn = isVadOn()
+            val chunked = prefs().getBoolean("ime_chunked", true)
             // user-adjustable timings (Settings page). chunk silence stored in tenths of a second (min 0.5s)
             val chunkSilenceMs = prefs().getInt("vad_chunk_silence_ds", 40).coerceIn(5, 100) * 100L
             val chunkTargetMs = prefs().getInt("chunk_target_s", 30).coerceIn(1, 45) * 1000L
@@ -376,7 +379,7 @@ class WhisperKeyboardService : InputMethodService() {
                         val inFirstWindow = now - recordStartMs < 15_000
                         val queueBusy = TranscriptionQueue.isActive()
                         val closeChunk = when {
-                            !hasContent -> false
+                            !hasContent || !chunked -> false
                             inFirstWindow -> (durMs >= 15_000 && silenceFor >= CHUNK_PAUSE_MS) || silenceFor >= 3_000
                             else -> (durMs >= chunkTargetMs && !queueBusy) ||
                                     (silenceFor >= chunkSilenceMs) ||

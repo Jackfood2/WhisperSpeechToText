@@ -50,6 +50,10 @@
                     <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchBt" android:text="Bluetooth mic" android:textSize="13sp" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
                     <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchCaps" android:text="Auto caps" android:textSize="13sp" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:checked="true"/>
                 </LinearLayout>
+                <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp">
+                    <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchImeChunked" android:text="Keyboard: chunked" android:textSize="13sp" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:checked="true"/>
+                    <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchBubbleChunked" android:text="Bubble: chunked" android:textSize="13sp" android:textColor="#212121" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:checked="true"/>
+                </LinearLayout>
 
                 <TextView android:id="@+id/tvCores" android:text="CPU cores detected" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp"/>
                 <Spinner android:id="@+id/spinnerThreads" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="#FFFFFF" android:popupBackground="#D9D9D9" android:layout_marginTop="4dp"/>
@@ -74,7 +78,7 @@
                     <SeekBar android:id="@+id/seekUnloadIdle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:min="0" android:max="12"/>
                     <TextView android:id="@+id/tvUnloadIdle" android:text="60s" android:textStyle="bold" android:textColor="#212121" android:textSize="13sp" android:layout_width="64dp" android:layout_height="wrap_content" android:gravity="end"/>
                 </LinearLayout>
-                <TextView android:text="Shorter pause = faster text delivery. Applies to the next recording." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"/>
+                <TextView android:text="Chunked ON = text appears progressively. OFF = whole recording processed once on Stop. Applies to next recording." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"/>
                 <TextView android:text="VAD: silence 1.3s → auto Stop. LIVE: composing preview while speaking. BT: VOICE_COMMUNICATION." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

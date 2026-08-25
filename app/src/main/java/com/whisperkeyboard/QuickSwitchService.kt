@@ -223,6 +223,12 @@ class QuickSwitchService : Service() {
             var lastVoiceTime = 0L
             var chunkStartMs = 0L
             var gotVoice = false
+            val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
+            val chunked = prefs.getBoolean("bubble_chunked", true)
+            // unified timing with the keyboard interface (Settings page)
+            val chunkSilenceMs = prefs.getInt("vad_chunk_silence_ds", 40).coerceIn(5, 100) * 100L
+            val chunkTargetMs = prefs.getInt("chunk_target_s", 30).coerceIn(1, 45) * 1000L
+            val recStartMs = System.currentTimeMillis()
             try {
                 // make sure the previous session's recorder/thread is fully gone before capturing
                 try { recThread?.join(800) } catch (_: Exception) {}
@@ -250,11 +256,15 @@ class QuickSwitchService : Service() {
                         val silenceFor = now - lastVoiceTime
                         val durMs = now - chunkStartMs
                         val hasContent = pcmChunk.size() >= MIN_CHUNK_BYTES // >=0.5s of audio
+                        val inFirstWindow = now - recStartMs < 15_000
+                        val queueBusy = TranscriptionQueue.isActive()
                         val closeChunk = when {
                             !hasContent -> false
-                            silenceFor >= CHUNK_SILENCE_MS || durMs >= CHUNK_TARGET_MS -> true
-                            durMs >= CHUNK_HARD_CAP_MS -> true
-                            else -> false
+                            !chunked -> durMs >= 900_000L // whole-audio mode: single piece (15-min safety split)
+                            inFirstWindow -> (durMs >= 15_000 && silenceFor >= WhisperKeyboardService.CHUNK_PAUSE_MS) || silenceFor >= 3_000
+                            else -> (durMs >= chunkTargetMs && !queueBusy) ||
+                                    silenceFor >= chunkSilenceMs ||
+                                    durMs >= CHUNK_HARD_CAP_MS
                         }
                         if (closeChunk) {
                             flushChunk(pcmChunk, model, lang)
