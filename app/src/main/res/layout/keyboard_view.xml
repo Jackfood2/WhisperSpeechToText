@@ -60,6 +60,12 @@
         </LinearLayout>
     </LinearLayout>
 
+    <!-- Outstanding transcripts held for later (lock screen etc.) - one tap inserts oldest -->
+    <LinearLayout android:id="@+id/rowOutstanding" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="6dp" android:visibility="gone">
+        <Button android:id="@+id/btnTypeOutstanding" android:text="📥 Type pending transcript" android:layout_width="0dp" android:layout_weight="1" android:layout_height="38dp" android:textSize="12sp" android:textStyle="bold" android:textColor="#212121" android:backgroundTint="#74B9FF"/>
+        <Button android:id="@+id/btnDiscardOutstanding" android:text="🗑" android:layout_width="42dp" android:layout_height="38dp" android:layout_marginStart="4dp" android:minWidth="0dp" android:paddingStart="0dp" android:paddingEnd="0dp" android:textSize="14sp" android:textColor="#FFFFFF" android:backgroundTint="#636E72" android:contentDescription="Discard oldest pending transcript"/>
+    </LinearLayout>
+
     <!-- Always visible: progress + processing controls + badge -->
     <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="8dp">
         <ProgressBar android:id="@+id/progressTranscribe" style="?android:attr/progressBarStyleHorizontal" android:layout_width="0dp" android:layout_weight="1" android:layout_height="8dp" android:max="100" android:progress="0" android:progressTint="#00B894"/>

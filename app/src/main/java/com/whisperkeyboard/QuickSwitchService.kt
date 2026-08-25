@@ -248,8 +248,8 @@ class QuickSwitchService : Service() {
                             raw.isEmpty() || raw.startsWith("ERROR") || AudioUtils.isNoSpeechText(raw) ->
                                 toast(if (raw.startsWith("ERROR")) "Failed: $raw" else "No speech detected")
                             else -> {
-                                val capped = WhisperKeyboardService.capsFn?.invoke(raw) ?: raw
-                                commitWhenReady(capped, 0)
+                                // auto-switch to whisper happened on release; router retries + a11y-paste if needed
+                                TextRouter.route(raw)
                             }
                         }
                     }
@@ -257,31 +257,6 @@ class QuickSwitchService : Service() {
                 onError = { err -> handler.post { toast("Transcription failed - Retry Failed in app"); AppLog.e("QuickSwitch", "PTT failed: $err") } }
             )
         )
-    }
-
-    /** Wait up to ~4s for the Whisper IME to bind to the field, then type; fallback TXT. */
-    private fun commitWhenReady(text: String, attempt: Int) {
-        val ic = WhisperKeyboardService.activeIC
-        if (ic != null) {
-            ic.commitText("$text ", 1)
-            toast("Typed: ${text.take(50)}")
-            AppLog.i("QuickSwitch", "PTT typed: ${text.take(60)}")
-        } else if (attempt < 8) {
-            handler.postDelayed({ commitWhenReady(text, attempt + 1) }, 500)
-        } else {
-            saveTxt(text)
-            toast("Saved to TXT (Whisper keyboard not active)")
-            AppLog.i("QuickSwitch", "PTT saved txt: ${text.take(60)}")
-        }
-    }
-
-    private fun saveTxt(text: String) {
-        try {
-            val docs = File(java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS), "WhisperNotes").absolutePath)
-            docs.mkdirs()
-            val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-            File(docs, "whisper_${fmt.format(Date())}.txt").appendText("$text\n")
-        } catch (e: Exception) { AppLog.w("QuickSwitch", "save txt: ${e.message}") }
     }
 
     private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()

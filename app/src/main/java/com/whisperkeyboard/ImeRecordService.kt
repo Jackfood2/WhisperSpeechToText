@@ -37,6 +37,7 @@ class ImeRecordService : Service() {
             .setContentText("Recording continues on lock screen")
             .setSmallIcon(android.R.drawable.presence_audio_online)
             .setOngoing(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .addAction(0, "■ Stop Recording", stopIntent)
             .build()
     }

@@ -192,6 +192,7 @@ object TranscriptionQueue {
         submittedCount.incrementAndGet()
         queue.put(job)
         Log.i(TAG, "Enqueued job, pending=${pendingCount.get()} paused=${paused.get()}")
+        ProcessingService.notifyActivity()
         ensureWorker()
     }
 

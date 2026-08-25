@@ -59,6 +59,9 @@ class WhisperKeyboardService : InputMethodService() {
     private var btnPanelDone: Button? = null
     private var simpleLayout: View? = null
     private var settingsPanel: View? = null
+    private var rowOutstanding: View? = null
+    private var btnTypeOutstanding: Button? = null
+    private var btnDiscardOutstanding: Button? = null
     private var rowProcessing: View? = null
     private var btnSkipOne: Button? = null
     private var btnStopAll: Button? = null
@@ -75,10 +78,13 @@ class WhisperKeyboardService : InputMethodService() {
     private var btnCaps: Button? = null
     private val handler = Handler(Looper.getMainLooper())
     private val backspaceHandler = Handler(Looper.getMainLooper())
+
+    @Volatile private var backspaceDelay = 350L
     private val backspaceRepeater = object : Runnable {
         override fun run() {
             try { currentInputConnection?.deleteSurroundingText(1, 0) } catch (_: Exception) {}
-            backspaceHandler.postDelayed(this, 50)
+            backspaceDelay = (backspaceDelay * 0.82).toLong().coerceAtLeast(45) // accelerate: ~350ms -> 45ms
+            backspaceHandler.postDelayed(this, backspaceDelay)
         }
     }
 
@@ -138,6 +144,9 @@ class WhisperKeyboardService : InputMethodService() {
         btnPanelDone = view.findViewById(R.id.btnPanelDone)
         simpleLayout = view.findViewById(R.id.simpleLayout)
         settingsPanel = view.findViewById(R.id.settingsPanel)
+        rowOutstanding = view.findViewById(R.id.rowOutstanding)
+        btnTypeOutstanding = view.findViewById(R.id.btnTypeOutstanding)
+        btnDiscardOutstanding = view.findViewById(R.id.btnDiscardOutstanding)
         rowProcessing = view.findViewById(R.id.rowProcessing)
         btnSkipOne = view.findViewById(R.id.btnSkipOne)
         btnStopAll = view.findViewById(R.id.btnStopAll)
@@ -155,17 +164,29 @@ class WhisperKeyboardService : InputMethodService() {
 
         btnMicCircle?.setOnClickListener { if (!isRecording.get()) startRecording() else stopRecordingAndTranscribe() }
         btnCloseKeyboard?.setOnClickListener {
-            Toast.makeText(this, if (isRecording.get() || TranscriptionQueue.isActive()) "Continues in background" else "Closed", Toast.LENGTH_SHORT).show()
+            val wasRecording = isRecording.get()
+            if (wasRecording) stopRecordingAndTranscribe() // stop mic NOW; chunks keep processing
+            Toast.makeText(this, if (wasRecording || TranscriptionQueue.isActive()) "Stopped - text will still be typed in" else "Closed", Toast.LENGTH_SHORT).show()
             try { if (!switchToPreviousInputMethod()) requestHideSelf(0) } catch (_: Exception) { try { requestHideSelf(0) } catch (_: Exception) {} }
         }
         btnEnter?.setOnClickListener {
             try { currentInputConnection?.commitText("\n", 1) } catch (_: Exception) {}
         }
-        btnBackspace?.setOnClickListener { deleteLastWord() }
+        // Dynamic backspace: tap deletes ONE character; holding repeats with accelerating speed
+        btnBackspace?.setOnClickListener { try { currentInputConnection?.deleteSurroundingText(1, 0) } catch (_: Exception) {} }
         btnBackspace?.setOnTouchListener { v, ev ->
             when (ev.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> { backspaceHandler.postDelayed(backspaceRepeater, 400); v.performClick(); true }
-                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> { backspaceHandler.removeCallbacks(backspaceRepeater); true }
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    try { currentInputConnection?.deleteSurroundingText(1, 0) } catch (_: Exception) {}
+                    backspaceDelay = 350
+                    backspaceHandler.postDelayed(backspaceRepeater, backspaceDelay)
+                    v.performClick()
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    backspaceHandler.removeCallbacks(backspaceRepeater)
+                    true
+                }
                 else -> false
             }
         }
@@ -177,6 +198,27 @@ class WhisperKeyboardService : InputMethodService() {
         btnPanelDone?.setOnClickListener {
             settingsPanel?.visibility = View.GONE
             simpleLayout?.visibility = View.VISIBLE
+        }
+
+        // Outstanding transcripts held from lock screen etc. - insert one per tap, oldest first
+        val outstandingListener: () -> Unit = { handler.post { updateOutstandingRow() } }
+        OutstandingStore.register(outstandingListener)
+        btnTypeOutstanding?.setOnClickListener {
+            val t = OutstandingStore.popOldest(this)
+            if (t != null) {
+                val capped = capsFn?.invoke(t) ?: t
+                try { currentInputConnection?.commitText("$capped ", 1) } catch (_: Exception) {}
+                val left = OutstandingStore.count(this)
+                Toast.makeText(this, if (left > 0) "Typed - $left more pending" else "Typed - all done", Toast.LENGTH_SHORT).show()
+                AppLog.i(TAG, "typed outstanding: ${t.take(50)}")
+                updateOutstandingRow()
+            }
+        }
+        btnDiscardOutstanding?.setOnClickListener {
+            if (OutstandingStore.discardOldest(this)) {
+                Toast.makeText(this, "Pending transcript discarded", Toast.LENGTH_SHORT).show()
+                updateOutstandingRow()
+            }
         }
 
         btnSkipOne?.setOnClickListener {
@@ -317,19 +359,6 @@ class WhisperKeyboardService : InputMethodService() {
         }
     }
 
-    private fun deleteLastWord() {
-        try {
-            val ic = currentInputConnection ?: return
-            val before = ic.getTextBeforeCursor(48, 0) ?: return
-            val trimmed = before.trimEnd()
-            val n = when {
-                trimmed.isEmpty() -> before.length.coerceAtLeast(1)
-                else -> { val idx = trimmed.lastIndexOf(' '); before.length - (if (idx < 0) 0 else idx + 1) }
-            }.coerceIn(1, 48)
-            ic.deleteSurroundingText(n, 0)
-        } catch (_: Exception) {}
-    }
-
     private fun startImeForeground() {
         try {
             val intent = Intent(this, ImeRecordService::class.java).apply { action = "START" }
@@ -450,7 +479,7 @@ class WhisperKeyboardService : InputMethodService() {
                 wavFile = wav,
                 model = model,
                 lang = lang,
-                onResult = { text -> commitWhenReady(text.trim(), 0) },
+                onResult = { text -> TextRouter.route(text.trim()) },
                 onError = { err ->
                     handler.post {
                         updateStatus("Chunk failed - Retry Failed in ⚙")
@@ -480,8 +509,7 @@ class WhisperKeyboardService : InputMethodService() {
             } else if (attempt < 8) {
                 handler.postDelayed({ commitWhenReady(text, attempt + 1) }, 500)
             } else {
-                Toast.makeText(this, "Field closed - text dropped. Keep keyboard open while recording.", Toast.LENGTH_LONG).show()
-                AppLog.e(TAG, "no input connection - dropped: ${text.take(60)}")
+                TextRouter.route(text) // fall back to accessibility paste / long retry
             }
             updateQueueBadge()
         }
@@ -532,6 +560,13 @@ class WhisperKeyboardService : InputMethodService() {
         }
     }
 
+    private fun updateOutstandingRow() {
+        val n = OutstandingStore.count(this)
+        rowOutstanding?.visibility = if (n > 0) View.VISIBLE else View.GONE
+        btnTypeOutstanding?.text = "📥 Type pending transcript ($n)"
+        if (n > 0) updateStatus("$n pending transcript(s) - tap the blue button to insert")
+    }
+
     override fun onStartInput(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
         super.onStartInput(info, restarting)
         activeIC = currentInputConnection
@@ -545,6 +580,7 @@ class WhisperKeyboardService : InputMethodService() {
         settingsPanel?.visibility = View.GONE
         preloadModel("onStartInputView")
         refreshAllButtons()
+        updateOutstandingRow()
         progressBar?.progress = TranscriptionQueue.progress()
         tvPct?.text = if (isRecording.get()) "REC" else "${TranscriptionQueue.progress()}%"
         updateQueueBadge()
