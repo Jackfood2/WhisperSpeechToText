@@ -14,7 +14,7 @@
                     <TextView android:text="Offline • Private • On-device Whisper  •  S23 FE optimized" android:textSize="13sp" android:textColor="#FFFFFF" android:alpha="0.95" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
                     <TextView android:text="Tip: adjust everything in ⚙ Settings." android:textSize="12sp" android:textColor="#FFFFFF" android:alpha="0.9" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"/>
                 </LinearLayout>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnOpenSettings" style="@style/Widget.Material3.Button.IconButton" android:layout_width="48dp" android:layout_height="48dp" app:icon="@android:drawable/ic_menu_manage" app:iconTint="#FFFFFF" app:iconGravity="textStart" android:contentDescription="Settings"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnOpenSettings" android:text="⚙ Settings" android:textSize="14sp" android:textStyle="bold" android:textColor="#4527A0" app:backgroundTint="#FFFFFF" app:iconTint="#4527A0" android:layout_width="wrap_content" android:layout_height="44dp" android:paddingStart="14dp" android:paddingEnd="14dp" android:insetTop="0dp" android:insetBottom="0dp" android:contentDescription="Settings"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

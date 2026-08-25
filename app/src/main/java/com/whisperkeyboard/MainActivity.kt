@@ -81,6 +81,7 @@ class MainActivity : AppCompatActivity() {
             intent.putExtra("mode", mode)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
             tvMeetingStatus.text = "Recording ($mode mode)... tap Stop (continues with screen off)"
+            Toast.makeText(this, "Meeting recording started ($mode)", Toast.LENGTH_SHORT).show()
         }
 
         findViewById<Button>(R.id.btnStopMeeting).setOnClickListener {
@@ -88,6 +89,7 @@ class MainActivity : AppCompatActivity() {
             intent.action = "STOP"
             startService(intent)
             tvMeetingStatus.text = "Stopping... transcript saving (wait for queue)"
+            Toast.makeText(this, "Stopping - transcript will be saved to Documents/WhisperNotes", Toast.LENGTH_LONG).show()
         }
 
         findViewById<Button>(R.id.btnDonate).setOnClickListener {

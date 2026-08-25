@@ -28,7 +28,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class WhisperKeyboardService : InputMethodService() {
 
-    private companion object { const val TAG = "WhisperIME" }
+    /** TAG + state shared with QuickSwitchService (push-to-talk types into the focused field). */
+    companion object {
+        const val TAG = "WhisperIME"
+        @Volatile var activeIC: android.view.inputmethod.InputConnection? = null
+        @Volatile var capsFn: ((String) -> String)? = null
+    }
 
     private val isRecording = AtomicBoolean(false)
     private var activeRecorder: AudioRecord? = null
@@ -149,6 +154,7 @@ class WhisperKeyboardService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         Log.i(TAG, "onCreateInputView")
+        capsFn = { applyCapsMode(it) }
         val view = layoutInflater.inflate(R.layout.keyboard_view, null)
         rootView = view
         tvStatus = view.findViewById(R.id.tvStatus)
@@ -212,7 +218,12 @@ class WhisperKeyboardService : InputMethodService() {
                 else -> false
             }
         }
-        btnSkipOne?.setOnClickListener { TranscriptionQueue.skipCurrentJob(); updateStatus("Skipping current..."); updateProcessingRow() }
+        btnSkipOne?.setOnClickListener {
+            TranscriptionQueue.skipCurrentJob()
+            updateStatus("Skipping current...")
+            Toast.makeText(this, "Skipped - moving to next", Toast.LENGTH_SHORT).show()
+            updateProcessingRow()
+        }
         btnStopAll?.setOnClickListener {
             val n = TranscriptionQueue.stopEverything()
             updateStatus("Stopped all ($n cleared)")
@@ -575,6 +586,13 @@ class WhisperKeyboardService : InputMethodService() {
 
     private fun updateStatus(text: String) { tvStatus?.text = text }
 
+    private val badgeRefresh = Runnable {
+        tvQueueBadge?.text = TranscriptionQueue.status()
+        btnPause?.text = if (TranscriptionQueue.isPaused()) "Resume" else "Pause"
+        progressBar?.progress = TranscriptionQueue.progress()
+        if (!TranscriptionQueue.isActive()) tvPct?.text = "${TranscriptionQueue.progress()}%" else updateProcessingRow()
+    }
+
     private fun updateQueueBadge() {
         val s = TranscriptionQueue.status()
         tvQueueBadge?.text = s
@@ -587,16 +605,14 @@ class WhisperKeyboardService : InputMethodService() {
             tvPct?.text = "$cur/$total"
         }
         updateProcessingRow()
-        tvQueueBadge?.postDelayed({
-            tvQueueBadge?.text = TranscriptionQueue.status()
-            btnPause?.text = if (TranscriptionQueue.isPaused()) "Resume" else "Pause"
-            progressBar?.progress = TranscriptionQueue.progress()
-            if (!TranscriptionQueue.isActive()) tvPct?.text = "${TranscriptionQueue.progress()}%" else updateProcessingRow()
-        }, 1200)
+        tvQueueBadge?.removeCallbacks(badgeRefresh)
+        tvQueueBadge?.postDelayed(badgeRefresh, 1200)
     }
 
     override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        // expose input connection for push-to-talk from the mic bubble
+        activeIC = currentInputConnection
         // interface shown -> make sure the selected model is loaded (fast no-op if cached)
         preloadModel("onStartInputView")
         refreshAllButtons()
@@ -617,6 +633,7 @@ class WhisperKeyboardService : InputMethodService() {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        if (finishingInput) activeIC = null
         // Model stays cached while the process lives - unloading on every keyboard hide caused
         // reload failures under memory pressure ("model load failed" during LIVE).
         // Unload happens only when the IME is destroyed (onDestroy) and idle.

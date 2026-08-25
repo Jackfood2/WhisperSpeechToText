@@ -79,6 +79,7 @@ class SettingsActivity : AppCompatActivity() {
                 refreshModelInfo()
                 if (m != prev) {
                     tvStatus.text = "Loading $m model..."
+                    Toast.makeText(this@SettingsActivity, "Switching model: $prev -> $m", Toast.LENGTH_SHORT).show()
                     Thread {
                         val mf = ModelManager.modelFile(this@SettingsActivity, m)
                         if (mf.exists() && mf.length() > 1_000_000) {
