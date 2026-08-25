@@ -28,6 +28,31 @@
 
 ## Changelog
 
+### v2.1.5 (2026-08-25) — Bubble hardening
+- Per-session audio buffer (rapid stop/start no longer corrupts chunks), crash-safe processing flag, drag vs long-press disambiguation, mic-conflict guard.
+
+### v2.1.4 (2026-08-25) — Bubble yellow-state fix
+- Stop starts the completion watcher: yellow → grey automatically once delivered/held.
+
+### v2.1.3 (2026-08-25) — Instant record + concurrent load
+- Mic & bubble start recording immediately; model loads in parallel; first chunk transcribes when ready.
+- Fixed bubble skipping the yellow state after stop.
+
+### v2.1.2 (2026-08-25) — Clipboard fallback + paste reliability
+- Held transcripts auto-copied to clipboard; accessibility paste searches all windows; one-time bridge hint.
+
+### v2.1.1 (2026-08-25) — Bubble lock-screen + empty-chunk fixes
+- Wakelock + lock-screen overlay for bubble recording; voice-gated chunking (no leading-silence chunks); silent chunks pre-dropped.
+
+### v2.1 (2026-08-25) — 3-state bubble
+- Grey/Green/Yellow tap-to-record states with toasts; long-press switches keyboard.
+
+### v2.0.x (2026-08-25) — Simplified keyboard + app-first settings
+- Keyboard = mic circle + backspace + gear(app settings) + close; chunked invisible stop-start engine; outstanding-transcript resume flow; signed release APK; Play Protect guidance.
+
+### v1.9.x (2026-08-24/25) — Resume flow era
+- Outstanding transcripts, dynamic backspace, TextRouter (IME → a11y paste → held), processing notification on lock screen, battery-aware model unload.
+
 ### v1.1 (2026-08-24) — Accuracy UX + UI polish
 - **High-contrast UI:** `#212121` on `#FFFFFF` cards with `stroke #E0E0E0`, 13sp+ fonts; spinner selected + dropdown now **black on white** (`spinner_item.xml`, `spinner_dropdown_item.xml`) — no more grey-on-white.
 - **Accuracy UX on keyboard:** `VAD: ON/OFF` (1.3s silence auto-Stop via RMS), `LIVE: ON/OFF` (1.6s preview via `setComposingText`), `BT: ON/OFF` (`VOICE_COMMUNICATION` + SCO), `Caps: AUTO/ON/OFF` + `isNoSpeechText` filter.
@@ -55,15 +80,43 @@
 
 ## Screenshots
 
-> Add screenshots of: (1) keyboard with Speak/Stop + model + output row + progress bar, (2) MainActivity model list + queue panel.
+> Add screenshots of: (1) keyboard with mic circle + labels row, (2) MainActivity, (3) Mic bubble states.
+
+## 🎙 Mic Bubble — setup & usage
+
+The bubble lets you dictate into **any app, from anywhere**, including with another keyboard active.
+
+### One-time setup (do this first)
+
+1. **Install permission** — in the app: **Settings → Mic Bubble → toggle ON** → allow *Display over other apps* → toggle ON again.
+2. **Accessibility (required for typing into other apps)** — Android path:
+   **Settings → Apps → Whisper Speech to Text → Permissions** *(some phones: Settings → Accessibility → Installed apps)*
+   then enable **"Whisper Typing Bridge"** → Allow.
+   *Without this the bubble still records, but text is held as "pending" (also auto-copied to clipboard) until you enable it.*
+3. *(Optional, instant keyboard switching)* connect phone once and run:
+   `adb shell pm grant com.whisperkeyboard android.permission.WRITE_SECURE_SETTINGS`
+
+### Using the bubble
+
+| Bubble color | Meaning | Tap action |
+|---|---|---|
+| ⚪ Light grey | Idle | **Start recording** |
+| 🟢 Green | Recording | **Stop** → chunks transcribe immediately |
+| 🟡 Yellow | Processing | Start a **new** recording anytime (previous keeps processing) |
+
+- Yellow returns to grey automatically when every chunk is typed/held.
+- **Drag** to reposition. **Long-press (≥0.5s)** = switch to Whisper keyboard / back to default.
+- Works on the **lock screen** (tap to stop there too).
+- If no text field can receive the transcript, it's **parked**: a notification counts it, it's **copied to the clipboard**, and the keyboard shows a blue *"Type pending transcript"* button — one tap inserts each entry.
 
 ## Quick Start (User)
 
 1. Download APK from **Releases** → install on your phone (allow Unknown Apps).
 2. Open **Whisper Speech to Text** → `1. Enable Keyboard` → toggle ON → `2. Switch` → choose **Whisper Speech to Text**.
 3. Pick `small` → `Download Model` (WiFi, 244 MB).
-4. Open any app → tap text field → **Speak** → talk → **Stop** → text inserts at cursor.
-5. Long meeting: app → `Start Meeting Recording` → notification shows time + queue → `Stop` → find `Documents/WhisperNotes/`.
+4. Open any app → tap text field → tap the big mic circle → talk → tap ■ to stop → text appears as you pause (chunked).
+5. Or set up the **Mic Bubble** (section above) and dictate from any app / lock screen.
+6. Long meeting: app → `Start Meeting Recording` → notification shows time + queue → `Stop` → find `Documents/WhisperNotes/`.
 
 ## Build from Source
 
