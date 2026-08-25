@@ -6,8 +6,22 @@
 
 **[→ Download the latest APK from Releases](https://github.com/Jackfood2/WhisperSpeechToText/releases/latest)**
 
-1. Tap the APK (`WhisperSpeechToText.apk`) → allow *Install unknown apps* if asked (Play Protect warning: tap **More details → Install anyway**)
+1. Tap the APK (`WhisperSpeechToText.apk`) → allow *Install unknown apps* if asked
 2. Open **Whisper Speech to Text** → enable the keyboard → pick a voice model → speak
+
+### If Google Play Protect blocks the install ("App blocked to protect your device")
+
+**Option A — keep Play Protect on (recommended):**
+1. On the warning screen, tap **More details** (or the small ▾ arrow)
+2. Tap **Install anyway** → confirm. Done — this is a one-time approval per update.
+
+**Option B — temporarily disable Play Protect:**
+1. Open the **Play Store** app → tap your profile icon (top right)
+2. **Play Protect** → tap the **⚙ Settings gear** (top right)
+3. Turn **off** *Scan apps with Play Protect* → confirm
+4. Install the APK, then turn scanning **back on**
+
+> Why this happens: the APK is self-signed and uses sensitive APIs (microphone service, accessibility typing bridge). It contains **no ads, no analytics, no network access after model download** — you can verify in the Privacy Dashboard inside the app.
 
 [![Download APK](https://img.shields.io/badge/⬇_Download-APK_(Releases)-2EA44F?style=for-the-badge&logo=android)](https://github.com/Jackfood2/WhisperSpeechToText/releases/latest) [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg?logo=paypal)](https://www.paypal.com/paypalme/jackfood2004) [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub-pink.svg?logo=github)](https://github.com/sponsors/Jackfood2)
 [![Release](https://img.shields.io/github/v/release/Jackfood2/WhisperSpeechToText?label=version)](https://github.com/Jackfood2/WhisperSpeechToText/releases/latest)
