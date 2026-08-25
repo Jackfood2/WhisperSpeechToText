@@ -1,9 +1,16 @@
-# Whisper Speech to Text for Android (apk) — Offline Android IME + Meeting Recorder
+# Whisper Speech to Text — Offline Android IME + Meeting Recorder
 
-> **On-device Whisper (tiny / base / small / medium) for Samsung Galaxy S23 FE and any arm64-v8a Android 8.0+ device. No internet after model download. Queue + adaptive progress + lock-screen recording.**
+> **On-device Whisper (tiny / base / small / medium) for any arm64-v8a Android 8.0+ device. No internet after model download. Queue + adaptive progress + lock-screen recording.**
 
-[![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg?logo=paypal)](https://www.paypal.com/paypalme/jackfood2004) [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub-pink.svg?logo=github)](https://github.com/sponsors/Jackfood2)
-![Release](https://img.shields.io/github/v/release/Jackfood2/WhisperSpeechToText)
+## ⬇ Download the APK
+
+**[→ Download the latest APK from Releases](https://github.com/Jackfood2/WhisperSpeechToText/releases/latest)**
+
+1. Tap the APK (`WhisperSpeechToText.apk`) → allow *Install unknown apps* if asked (Play Protect warning: tap **More details → Install anyway**)
+2. Open **Whisper Speech to Text** → enable the keyboard → pick a voice model → speak
+
+[![Download APK](https://img.shields.io/badge/⬇_Download-APK_(Releases)-2EA44F?style=for-the-badge&logo=android)](https://github.com/Jackfood2/WhisperSpeechToText/releases/latest) [![Donate PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg?logo=paypal)](https://www.paypal.com/paypalme/jackfood2004) [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub-pink.svg?logo=github)](https://github.com/sponsors/Jackfood2)
+[![Release](https://img.shields.io/github/v/release/Jackfood2/WhisperSpeechToText?label=version)](https://github.com/Jackfood2/WhisperSpeechToText/releases/latest)
 
 ## Changelog
 
@@ -30,7 +37,7 @@
 | **Queue system** | `LinkedBlockingQueue + single-thread executor`. Speak while busy → queued FIFO. `Pause / Resume / Clear Queue / Retry Failed` on both keyboard and app. Failed WAVs auto-saved. |
 | **Adaptive progress bar** | Mini `ProgressBar + %` on keyboard and `MainActivity`. Expected time = `audioSec * avgRatio + 0.6s` where `avgRatio` is **per-model learned average** (`transcribeSec/audioSec` stored in `whisper_stats` prefs). The more you use it, the more accurate. Creeps 88→98% if slower than expected, jumps 100% on finish. |
 | **Lock-screen recording** | `ImeRecordService` (keyboard) + `MeetingRecordService` hold `PARTIAL_WAKE_LOCK + foreground notification` → continues with screen off / auto-lock. Stop via keyboard or notification. |
-| **Model manager** | In-app `Download / Verify`, `Downloaded: tiny 39MB ...`, `Clear All`. Models from `huggingface.co/ggerganov/whisper.cpp` → `…/files/models/ggml-*.bin`. S23 FE (Snapdragon 8 Gen1, 8 GB): `tiny` ~0.5 s/10 s, `base` ~1 s, `small` **recommended** ~2.5 s, `medium` ~6 s. |
+| **Model manager** | In-app `Download / Verify`, `Downloaded: tiny 39MB ...`, `Clear All`. Models from `huggingface.co/ggerganov/whisper.cpp` → `…/files/models/ggml-*.bin`. Modern mid/high-end Android \(e.g. Snapdragon 8-series, 8 GB RAM\): `tiny` ~0.5 s/10 s, `base` ~1 s, `small` **recommended** ~2.5 s, `medium` ~6 s. |
 
 ## Screenshots
 
@@ -38,7 +45,7 @@
 
 ## Quick Start (User)
 
-1. Download APK from **Releases** → install on S23 FE (allow Unknown Apps).
+1. Download APK from **Releases** → install on your phone (allow Unknown Apps).
 2. Open **Whisper Speech to Text** → `1. Enable Keyboard` → toggle ON → `2. Switch` → choose **Whisper Speech to Text**.
 3. Pick `small` → `Download Model` (WiFi, 244 MB).
 4. Open any app → tap text field → **Speak** → talk → **Stop** → text inserts at cursor.
@@ -115,13 +122,13 @@ Check: `git status` should show only the files above, not `build/` or `whisper.c
 | `WAKE_LOCK` | keep recording with screen off |
 | `POST_NOTIFICATIONS` | meeting REC notification with Stop action |
 
-## Performance Notes (S23 FE)
+## Performance Notes
 
 The device has no per-app model warm-up; first transcription after app launch is ~1 s slower (model load). Keep `small` for best accuracy/battery. Use `tiny`/`base` for instant notes. `medium` needs WiFi download and may OOM if many apps open — close others first.
 
 ## Donate
 
-If this saves you time, support offline development — [paypal.me/jackfood2004](https://www.paypal.com/paypalme/jackfood2004) — or use GitHub Sponsors ( ♥ Sponsor button on repo). Funds go to S23 FE testing + smaller/faster models.
+If this saves you time, support offline development — **PayPal: jackfood2004@gmail.com** — [paypal.me/jackfood2004](https://www.paypal.com/paypalme/jackfood2004) — or use GitHub Sponsors ( ♥ Sponsor button on repo). Funds go to device testing + smaller/faster models.
 
 > PayPal email: `jackfood2004@gmail.com` — also works via `Send money` in the PayPal app.
 
@@ -135,3 +142,5 @@ If this saves you time, support offline development — [paypal.me/jackfood2004]
 ## License
 
 MIT — see `LICENSE`.
+
+
