@@ -23,9 +23,16 @@
 
     <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="6dp">
 
-        <!-- Big circular record button -->
+        <!-- Big circular record button (real mic / stop icons) -->
         <FrameLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content">
-            <Button android:id="@+id/btnMicCircle" android:text="🎤" android:textSize="26sp" android:layout_width="84dp" android:layout_height="84dp" android:layout_gravity="center_horizontal" android:insetTop="0dp" android:insetBottom="0dp" android:padding="0dp" android:textColor="#FFFFFF" android:backgroundTint="#00B894" android:contentDescription="Record"/>
+            <androidx.appcompat.widget.AppCompatImageButton
+                android:id="@+id/btnMicCircle"
+                android:layout_width="84dp" android:layout_height="84dp"
+                android:layout_gravity="center_horizontal"
+                android:background="@drawable/bg_circle"
+                android:backgroundTint="#00B894"
+                android:src="@drawable/ic_mic"
+                android:contentDescription="Record"/>
         </FrameLayout>
 
         <!-- Backspace only (tap = char, hold = words accelerating) -->

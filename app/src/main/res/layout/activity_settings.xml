@@ -90,7 +90,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <com.google.android.material.button.MaterialButton android:id="@+id/btnSaveSettings" android:text="Save Settings (updates keyboard instantly)" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"/>
+        <TextView android:id="@+id/tvSettingsHint" android:text="Changes save automatically" android:textSize="12sp" android:textColor="#757575" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:layout_marginTop="10dp"/>
 
     </LinearLayout>
 </ScrollView>

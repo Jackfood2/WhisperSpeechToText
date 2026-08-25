@@ -1,4 +1,4 @@
-package com.whisperkeyboard
+﻿package com.whisperkeyboard
 
 import android.Manifest
 import android.content.Intent
@@ -48,7 +48,7 @@ class WhisperKeyboardService : InputMethodService() {
     private var tvQueueBadge: TextView? = null
     private var tvPct: TextView? = null
     private var progressBar: ProgressBar? = null
-    private var btnMicCircle: Button? = null
+    private var btnMicCircle: androidx.appcompat.widget.AppCompatImageButton? = null
     private var btnCloseKeyboard: Button? = null
     private var btnBackspace: Button? = null
     private var btnKeyboardGear: Button? = null
@@ -207,9 +207,19 @@ class WhisperKeyboardService : InputMethodService() {
         }
         btnStopAll?.setOnClickListener {
             val n = TranscriptionQueue.stopEverything()
-            updateStatus("Stopped all ($n cleared)")
+            updateStatus("Force stop requested...")
             progressBar?.progress = 0; tvPct?.text = "0%"
             updateProcessingRow(); updateQueueBadge()
+            // confirm once the native abort has actually landed
+            fun confirmStop(attempt: Int) {
+                if (!TranscriptionQueue.isActive() && !WhisperEngine.isBusy()) {
+                    updateStatus("Processing stopped ✓")
+                    Toast.makeText(this, "Processing stopped", Toast.LENGTH_SHORT).show()
+                    AppLog.i(TAG, "force stop confirmed")
+                } else if (attempt < 20) handler.postDelayed({ confirmStop(attempt + 1) }, 150)
+                else Toast.makeText(this, "Still stopping - model abort may take a moment", Toast.LENGTH_LONG).show()
+            }
+            handler.postDelayed({ confirmStop(0) }, 150)
         }
 
         TranscriptionQueue.addListener(pqListener)
@@ -280,7 +290,7 @@ class WhisperKeyboardService : InputMethodService() {
     }
 
     private fun setCircleVisual(recording: Boolean) {
-        btnMicCircle?.text = if (recording) "â– " else "ðŸŽ¤"
+        btnMicCircle?.setImageResource(if (recording) R.drawable.ic_stop else R.drawable.ic_mic)
         btnMicCircle?.backgroundTintList = android.content.res.ColorStateList.valueOf(
             if (recording) 0xFFE17055.toInt() else 0xFF00B894.toInt())
     }
@@ -528,6 +538,7 @@ class WhisperKeyboardService : InputMethodService() {
         super.onDestroy()
     }
 }
+
 
 
 

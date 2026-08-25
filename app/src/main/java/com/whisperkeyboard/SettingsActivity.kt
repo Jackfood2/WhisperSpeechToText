@@ -20,6 +20,12 @@ import kotlinx.coroutines.withContext
 
 class SettingsActivity : AppCompatActivity() {
 
+    private var lastToastAt = 0L
+    private fun saved() {
+        val now = System.currentTimeMillis()
+        if (now - lastToastAt > 700) { lastToastAt = now; Toast.makeText(this, "Setting saved", Toast.LENGTH_SHORT).show() }
+    }
+
     private lateinit var spinnerModel: Spinner
     private lateinit var spinnerLang: Spinner
     private lateinit var tvStatus: TextView
@@ -59,10 +65,10 @@ class SettingsActivity : AppCompatActivity() {
         swLive.isChecked = prefs.getBoolean("live_on", true)
         swBt.isChecked = prefs.getBoolean("bt_mic", false)
         swCaps.isChecked = prefs.getString("caps_mode", "auto") != "off"
-        swVad.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("vad_on", b).apply() }
-        swLive.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("live_on", b).apply() }
-        swBt.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("bt_mic", b).apply() }
-        swCaps.setOnCheckedChangeListener { _, b -> prefs.edit().putString("caps_mode", if (b) "auto" else "off").apply() }
+        swVad.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("vad_on", b).apply(); saved() }
+        swLive.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("live_on", b).apply(); saved() }
+        swBt.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("bt_mic", b).apply(); saved() }
+        swCaps.setOnCheckedChangeListener { _, b -> prefs.edit().putString("caps_mode", if (b) "auto" else "off").apply(); saved() }
 
         // ---- Threads (CPU cores) ----
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
@@ -79,6 +85,7 @@ class SettingsActivity : AppCompatActivity() {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) {
                 val mode = if (pos == 0) "auto" else threadOptions[pos]
                 prefs.edit().putString("threads_mode", mode).apply()
+                saved()
                 val n = WhisperEngine.applyThreadPref(this@SettingsActivity)
                 Toast.makeText(this@SettingsActivity, "Whisper will use $n threads", Toast.LENGTH_SHORT).show()
             }
@@ -100,7 +107,7 @@ class SettingsActivity : AppCompatActivity() {
                 if (fromUser) prefs.edit().putInt("vad_chunk_silence_ds", ds).apply()
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
-            override fun onStopTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) { saved() }
         })
 
         // chunk length (seconds)
@@ -115,7 +122,7 @@ class SettingsActivity : AppCompatActivity() {
                 if (fromUser) prefs.edit().putInt("chunk_target_s", p.coerceIn(1, 45)).apply()
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
-            override fun onStopTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) { saved() }
         })
 
         val seekStopSilence = findViewById<SeekBar>(R.id.seekStopSilence)
@@ -129,7 +136,7 @@ class SettingsActivity : AppCompatActivity() {
                 if (fromUser) prefs.edit().putInt("vad_stop_silence_s", p).apply()
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
-            override fun onStopTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) { saved() }
         })
 
         spinnerModel.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
@@ -158,7 +165,7 @@ class SettingsActivity : AppCompatActivity() {
 
         spinnerLang.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) {
-                prefs.edit().putString("lang", langs[pos]).apply()
+                prefs.edit().putString("lang", langs[pos]).apply(); saved()
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
@@ -204,7 +211,7 @@ class SettingsActivity : AppCompatActivity() {
                 if (swBubble.isChecked) startService(Intent(this@SettingsActivity, QuickSwitchService::class.java).putExtra("alpha", alphaPct))
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
-            override fun onStopTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) { saved() }
         })
 
         // ---- Buttons ----
@@ -253,10 +260,6 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<Button>(R.id.btnSaveSettings).setOnClickListener {
-            prefs.edit().putLong("last_save", System.currentTimeMillis()).apply()
-            Toast.makeText(this, "Settings saved - keyboard updates instantly", Toast.LENGTH_SHORT).show()
-        }
 
         // preload status
         val lastModel = prefs.getString("model", "small") ?: "small"
