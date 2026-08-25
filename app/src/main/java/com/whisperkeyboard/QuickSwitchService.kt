@@ -270,6 +270,7 @@ class QuickSwitchService : Service() {
         finalFlushPending = true
         setState(STATE_PROC, "Recording stopped - processing...")
         AppLog.i("Bubble", "recording stopped by tap")
+        watchCompletion() // drive yellow -> grey once everything is delivered
     }
 
     private fun enterProcessing() {
