@@ -24,18 +24,16 @@ import android.view.WindowManager
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
- * Floating round mic bubble:
- *  - Tap: switch to Whisper keyboard / back to previous keyboard
- *  - Hold (>=280ms): push-to-talk - records while held, transcribes on release
- *  - Drag: move anywhere
+ * Floating round mic bubble - 3 states:
+ *  GREY   idle          : tap = start recording; long-press = switch keyboard
+ *  GREEN  recording     : tap = stop recording (chunks keep processing)
+ *  YELLOW processing    : tap = start a NEW recording (previous processing is not interrupted)
+ * When all processing + typing finishes, yellow returns to grey.
  *
- * Text goes into the focused field if the Whisper keyboard owns an input connection,
- * otherwise saved to Documents/WhisperNotes/.
+ * Delivery: typed into the focused field when possible, else parked in the
+ * outstanding-transcript flow (notification + keyboard insert button).
  */
 class QuickSwitchService : Service() {
 
@@ -43,18 +41,22 @@ class QuickSwitchService : Service() {
         const val CHANNEL = "quick_switch"
         const val NOTIF_ID = 42
         const val WHISPER_IME = "com.whisperkeyboard/.WhisperKeyboardService"
-        const val HOLD_MS = 280L
-        const val MAX_PTT_MS = 60_000L
+        const val CHUNK_SILENCE_MS = 4000L
+        const val CHUNK_TARGET_MS = 30_000L
+        const val CHUNK_HARD_CAP_MS = 45_000L
+        const val STATE_IDLE = 0
+        const val STATE_REC = 1
+        const val STATE_PROC = 2
     }
 
-    private var bubble: View? = null
+    private var bubble: BubbleView? = null
     private var wm: WindowManager? = null
     private val handler = Handler(Looper.getMainLooper())
 
-    // push-to-talk state
-    @Volatile private var pttRecording = false
-    private var pttThread: Thread? = null
-    private var pttBuffer = ByteArrayOutputStream()
+    @Volatile private var state = STATE_IDLE
+    @Volatile private var recActive = false
+    private var recThread: Thread? = null
+    private val recBuffer = ByteArrayOutputStream()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -66,36 +68,54 @@ class QuickSwitchService : Service() {
         }
         startForeground(NOTIF_ID, buildNotif())
         showBubble()
-        AppLog.i("QuickSwitch", "bubble shown")
+        AppLog.i("Bubble", "shown")
     }
 
     private fun buildNotif(): Notification =
         androidx.core.app.NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("Whisper mic bubble")
-            .setContentText("Tap: switch keyboard. Hold: talk.")
+            .setContentText("Tap: record. Long-press: switch keyboard.")
             .setOngoing(true)
             .setPriority(androidx.core.app.NotificationCompat.PRIORITY_MIN)
             .build()
 
     private inner class BubbleView(context: Context) : View(context) {
         val dp = resources.displayMetrics.density
-        val greyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCCE0E0E0.toInt() }
-        val recPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE6FF5252.toInt() }
-        val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = 1.5f * dp; color = 0x66000000
-        }
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.BLACK; textSize = 15f * dp; textAlign = Paint.Align.CENTER
-        }
+        val idlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE6E0E0E0.toInt() }
+        val recPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xF200B894.toInt() }
+        val procPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE6FDCB6E.toInt() }
+        val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f * dp; color = 0x66000000 }
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; textSize = 15f * dp; textAlign = Paint.Align.CENTER }
 
         override fun onDraw(canvas: Canvas) {
+            val fill = when (state) {
+                STATE_REC -> recPaint
+                STATE_PROC -> procPaint
+                else -> idlePaint
+            }
             val r = width / 2f - 1.5f * dp
-            canvas.drawCircle(width / 2f, height / 2f, r, if (pttRecording) recPaint else greyPaint)
+            canvas.drawCircle(width / 2f, height / 2f, r, fill)
             canvas.drawCircle(width / 2f, height / 2f, r, ringPaint)
+            val glyph = when (state) {
+                STATE_REC -> "\u25A0"      // stop square
+                STATE_PROC -> "..."        // processing
+                else -> context.getString(R.string.mic_glyph) // mic
+            }
             val y = height / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
-            canvas.drawText("\uD83C\uDFA4", width / 2f, y, textPaint)
+            canvas.drawText(glyph, width / 2f, y, textPaint)
         }
+    }
+
+    private fun applyAlpha() {
+        val pct = getSharedPreferences("whisper", MODE_PRIVATE).getInt("bubble_alpha", 75)
+        bubble?.alpha = (pct / 100.0f).coerceIn(0.15f, 1.0f)
+    }
+
+    private fun setState(s: Int, toastMsg: String?) {
+        state = s
+        bubble?.invalidate()
+        if (!toastMsg.isNullOrEmpty()) toast(toastMsg)
     }
 
     private fun showBubble() {
@@ -118,121 +138,136 @@ class QuickSwitchService : Service() {
         var startX = 0f; var startY = 0f
         var moved = false
 
-        val holdRunnable = Runnable { startPtt() }
-
         btn.setOnTouchListener { v, ev ->
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = ev.rawX; downY = ev.rawY; startX = params.x.toFloat(); startY = params.y.toFloat()
                     moved = false
-                    handler.postDelayed(holdRunnable, HOLD_MS)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = ev.rawX - downX; val dy = ev.rawY - downY
-                    if (!moved && dx * dx + dy * dy > 144) { moved = true; handler.removeCallbacks(holdRunnable) }
-                    if (moved && !pttRecording) {
+                    if (!moved && dx * dx + dy * dy > 144) moved = true
+                    if (moved && !recActive) {
                         params.x = startX.toInt() + dx.toInt(); params.y = startY.toInt() + dy.toInt()
                         wm?.updateViewLayout(v, params)
                     }
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    handler.removeCallbacks(holdRunnable)
-                    if (pttRecording) stopPtt()
-                    else if (!moved) v.performClick()
+                    if (moved) v.performLongClick() else v.performClick()
                     true
                 }
                 else -> false
             }
         }
-        btn.setOnClickListener { toggleIme() }
+        btn.setOnClickListener { handleTap() }
+        btn.setOnLongClickListener { toggleIme(); true }
         bubble = btn
-        try { wm?.addView(btn, params); applyAlpha() } catch (e: Exception) { AppLog.e("QuickSwitch", "overlay failed: ${e.message}") }
+        try { wm?.addView(btn, params); applyAlpha() } catch (e: Exception) { AppLog.e("Bubble", "overlay failed: ${e.message}") }
     }
 
-    private fun applyAlpha() {
-        val pct = getSharedPreferences("whisper", MODE_PRIVATE).getInt("bubble_alpha", 75)
-        bubble?.alpha = (pct / 100.0f).coerceIn(0.15f, 1.0f)
+    /** Tap behavior per state: IDLE->record, REC->stop(+process), PROC->start new session too. */
+    private fun handleTap() {
+        when (state) {
+            STATE_IDLE -> startRec()
+            STATE_REC -> stopRec()
+            STATE_PROC -> startRec() // previous processing continues untouched
+        }
     }
 
-    // ---------- Push-to-talk ----------
-
-    private fun startPtt() {
-        if (pttRecording) return
+    private fun startRec() {
+        if (recActive) return
         val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
         val model = prefs.getString("model", "small") ?: "small"
         val mf = ModelManager.modelFile(this, model)
         if (!mf.exists() || mf.length() < 1_000_000) {
-            toast("$model model not downloaded - open app")
+            toast("$model model not downloaded - open the app")
             return
         }
-        pttRecording = true
-        pttBuffer = ByteArrayOutputStream()
-        bubble?.invalidate()
-        toast("Recording... release to transcribe")
-        AppLog.i("QuickSwitch", "PTT start")
+        ensureWhisperActive() // best effort so delivery can type directly
+        recActive = true
+        setState(STATE_REC, null)
+        toast("Recording started - tap to stop")
+        AppLog.i("Bubble", "recording started")
         val lang = prefs.getString("lang", "auto") ?: "auto"
-        pttThread = Thread {
+        recThread = Thread {
+            var lastVoiceTime = System.currentTimeMillis()
+            var chunkStartMs = System.currentTimeMillis()
             try {
                 val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
                 val rec = AudioRecord(MediaRecorder.AudioSource.MIC, 16000, AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf, 32000))
                 rec.startRecording()
                 val buf = ByteArray(4096)
-                val start = System.currentTimeMillis()
-                while (pttRecording && System.currentTimeMillis() - start < MAX_PTT_MS) {
+                while (recActive) {
                     val n = rec.read(buf, 0, buf.size)
-                    if (n > 0) synchronized(pttBuffer) { pttBuffer.write(buf, 0, n) }
+                    if (n <= 0) break
+                    synchronized(recBuffer) { recBuffer.write(buf, 0, n) }
+                    val rms = AudioUtils.rms16(buf, n)
+                    val now = System.currentTimeMillis()
+                    if (rms > WhisperKeyboardService.VAD_THRESH) lastVoiceTime = now
+                    val silenceFor = now - lastVoiceTime
+                    val durMs = now - chunkStartMs
+                    val hasContent = recBuffer.size() > 1800
+                    val closeChunk = when {
+                        !hasContent -> false
+                        silenceFor >= CHUNK_SILENCE_MS || durMs >= CHUNK_TARGET_MS -> true
+                        durMs >= CHUNK_HARD_CAP_MS -> true
+                        else -> false
+                    }
+                    if (closeChunk) {
+                        flushChunk(recBuffer, model, lang)
+                        synchronized(recBuffer) { recBuffer.reset() }
+                        chunkStartMs = now
+                        lastVoiceTime = now
+                    }
                 }
                 try { rec.stop(); rec.release() } catch (_: Exception) {}
-                if (!pttRecording || System.currentTimeMillis() - start >= MAX_PTT_MS) finishPtt(model, lang)
+                flushChunk(recBuffer, model, lang) // final partial chunk
             } catch (e: Throwable) {
-                AppLog.e("QuickSwitch", "PTT error: ${e.message}")
+                AppLog.e("Bubble", "rec error: ${e.message}")
                 handler.post { toast("Mic error: ${e.message}") }
-                pttRecording = false
-                handler.post { bubble?.invalidate() }
+            } finally {
+                handler.post {
+                    if (state == STATE_REC) enterProcessing()
+                }
             }
-        }.apply { isDaemon = true; start() }
+        }.apply { isDaemon = true; name = "bubble-rec"; start() }
     }
 
-    private fun stopPtt() {
-        if (!pttRecording) return
-        pttRecording = false
-        // Switch to Whisper NOW so its IME owns the field by the time transcription finishes
-        val switched = ensureWhisperActive()
-        if (switched) toast("Switching to Whisper keyboard...")
-        handler.post { bubble?.invalidate() }
+    private fun stopRec() {
+        if (!recActive) return
+        recActive = false
+        toast("Recording stopped - processing...")
+        AppLog.i("Bubble", "recording stopped by tap")
     }
 
-    /** Returns true if Whisper IME is (or now is) the active input method. */
-    private fun ensureWhisperActive(): Boolean {
-        return try {
-            val current = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) ?: ""
-            if (current.equals(WHISPER_IME, ignoreCase = true)) return true
-            getSharedPreferences("whisper", MODE_PRIVATE).edit().putString("prev_ime", current).apply()
-            try {
-                Settings.Secure.putString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD, WHISPER_IME)
-                true
-            } catch (e: SecurityException) {
-                AppLog.w("QuickSwitch", "cannot auto-switch (no WRITE_SECURE_SETTINGS)")
-                false
-            }
-        } catch (e: Exception) { false }
+    private fun enterProcessing() {
+        setState(STATE_PROC, null)
+        watchCompletion()
     }
 
-    private fun finishPtt(model: String, lang: String) {
-        handler.post { bubble?.invalidate() }
-        val bytes = synchronized(pttBuffer) { pttBuffer.toByteArray() }
-        if (bytes.size < 16000) { // < ~0.5s
-            handler.post { toast("Too short - hold longer") }
-            return
+    /** Yellow until every chunk is transcribed AND delivered (typed or parked). */
+    private fun watchCompletion(attempt: Int = 0) {
+        if (state != STATE_PROC) return // a new recording took over
+        val busy = TranscriptionQueue.isActive() || TextRouter.pendingTypingCount() > 0
+        if (busy) {
+            handler.postDelayed({ watchCompletion(attempt + 1) }, 500)
+        } else {
+            setState(STATE_IDLE, "Done - transcript delivered or held for later")
+            AppLog.i("Bubble", "processing complete -> idle")
         }
-        handler.post { toast("Processing ${bytes.size / 32000}s audio...") }
+    }
+
+    /** Write one chunk WAV and enqueue; delivery handled by TextRouter. */
+    private fun flushChunk(buffer: ByteArrayOutputStream, model: String, lang: String) {
+        val bytes = synchronized(buffer) { buffer.toByteArray() }
+        if (bytes.size <= 1800) return
         val ts = System.currentTimeMillis()
-        val pcm = File(cacheDir, "ptt_$ts.pcm")
+        val pcm = File(cacheDir, "bubble_$ts.pcm")
         FileOutputStream(pcm).use { it.write(bytes) }
-        val wav = File(cacheDir, "ptt_$ts.wav")
+        val wav = File(cacheDir, "bubble_$ts.wav")
         AudioUtils.pcmToWav(pcm, wav)
         pcm.delete()
         TranscriptionQueue.enqueue(
@@ -244,29 +279,40 @@ class QuickSwitchService : Service() {
                 onResult = { text ->
                     val raw = text.trim()
                     handler.post {
-                        when {
-                            raw.isEmpty() || raw.startsWith("ERROR") || AudioUtils.isNoSpeechText(raw) ->
-                                toast(if (raw.startsWith("ERROR")) "Failed: $raw" else "No speech detected")
-                            else -> {
-                                // auto-switch to whisper happened on release; router retries + a11y-paste if needed
-                                TextRouter.route(raw)
-                            }
+                        if (raw.isEmpty() || raw.startsWith("ERROR") || AudioUtils.isNoSpeechText(raw)) {
+                            toast(if (raw.startsWith("ERROR")) "Chunk failed" else "No speech in chunk")
+                        } else {
+                            TextRouter.route(raw)
                         }
                     }
                 },
-                onError = { err -> handler.post { toast("Transcription failed - Retry Failed in app"); AppLog.e("QuickSwitch", "PTT failed: $err") } }
+                onError = { err ->
+                    handler.post { toast("Transcription failed - Retry Failed in app") }
+                    AppLog.e("Bubble", "chunk failed: $err")
+                }
             )
         )
+        ProcessingService.notifyActivity()
     }
 
     private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
 
-    // ---------- Keyboard toggle ----------
+    /** Best-effort: make Whisper the active IME so delivery can type directly (needs WRITE_SECURE_SETTINGS). */
+    private fun ensureWhisperActive(): Boolean {
+        return try {
+            val current = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) ?: ""
+            if (current.equals(WHISPER_IME, ignoreCase = true)) return true
+            getSharedPreferences("whisper", MODE_PRIVATE).edit().putString("prev_ime", current).apply()
+            try {
+                Settings.Secure.putString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD, WHISPER_IME)
+                true
+            } catch (e: SecurityException) { false }
+        } catch (e: Exception) { false }
+    }
 
-    /** Toggle: switch to Whisper IME, or back to the saved previous one. */
+    /** Switch to Whisper IME / back. Without WRITE_SECURE_SETTINGS this silently opens the system picker. */
     private fun toggleIme() {
         try {
-            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
             val current = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) ?: ""
             val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
             val goingWhisper = !current.equals(WHISPER_IME, ignoreCase = true)
@@ -276,30 +322,27 @@ class QuickSwitchService : Service() {
             } else {
                 prefs.getString("prev_ime", "") ?: ""
             }
-            AppLog.i("QuickSwitch", "toggle: from=$current to=$target")
             if (target.isNotEmpty()) {
                 try {
-                    if (Settings.Secure.putString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD, target)) {
-                        toast(if (goingWhisper) "Whisper ON" else "Keyboard restored")
-                        return
-                    }
+                    Settings.Secure.putString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD, target)
+                    toast(if (goingWhisper) "Whisper keyboard ON" else "Default keyboard restored")
+                    return
                 } catch (e: SecurityException) {
-                    AppLog.w("QuickSwitch", "no WRITE_SECURE_SETTINGS - using picker")
-                    toast("Grant WRITE_SECURE_SETTINGS via adb for instant switch")
+                    // no WRITE_SECURE_SETTINGS - system picker handles it silently
                 }
             }
-            imm.showInputMethodPicker()
+            (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showInputMethodPicker()
         } catch (e: Exception) {
-            AppLog.e("QuickSwitch", "toggle error: ${e.message}")
+            AppLog.e("Bubble", "toggle error: ${e.message}")
         }
     }
 
     override fun onDestroy() {
-        pttRecording = false
+        recActive = false
+        handler.removeCallbacksAndMessages(null)
         try { bubble?.let { wm?.removeView(it) } } catch (_: Exception) {}
         bubble = null
-        handler.removeCallbacksAndMessages(null)
-        AppLog.i("QuickSwitch", "bubble removed")
+        AppLog.i("Bubble", "removed")
         super.onDestroy()
     }
 
@@ -310,7 +353,7 @@ class QuickSwitchService : Service() {
             "STOP" -> { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
             else -> {
                 val alpha = intent?.getIntExtra("alpha", -1) ?: -1
-                if (alpha > 0) { applyAlpha(); AppLog.i("QuickSwitch", "alpha -> $alpha%") }
+                if (alpha > 0) { applyAlpha(); AppLog.i("Bubble", "alpha -> $alpha%") }
             }
         }
         return START_STICKY

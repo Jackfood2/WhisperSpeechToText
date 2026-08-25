@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Whisper Speech to Text</string>
+    <string name="mic_glyph">\uD83C\uDFA4</string>
     <string name="a11y_service_desc">Lets Whisper Speech to Text paste transcribed text into any app even when another keyboard is active. Does not read or collect your data.</string>
 </resources>
