@@ -1,4 +1,4 @@
-package com.whisperkeyboard
+﻿package com.whisperkeyboard
 
 import android.content.Intent
 import android.os.Bundle
@@ -7,8 +7,6 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ProgressBar
-import android.widget.RadioButton
-import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
@@ -51,11 +49,6 @@ class SettingsActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
         spinnerModel.setSelection(models.indexOf(prefs.getString("model", "small")).coerceAtLeast(0))
         spinnerLang.setSelection(langs.indexOf(prefs.getString("lang", "auto")).coerceAtLeast(0))
-        when (prefs.getString("entry_mode", "type")) {
-            "txt" -> findViewById<RadioButton>(R.id.radioEntryTxt).isChecked = true
-            "both" -> findViewById<RadioButton>(R.id.radioEntryBoth).isChecked = true
-            else -> findViewById<RadioButton>(R.id.radioEntryType).isChecked = true
-        }
 
         // Accuracy switches
         val swVad = findViewById<SwitchMaterial>(R.id.switchVad)
@@ -102,14 +95,7 @@ class SettingsActivity : AppCompatActivity() {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
 
-        findViewById<RadioGroup>(R.id.radioEntryMode).setOnCheckedChangeListener { _, checkedId ->
-            val mode = when (checkedId) {
-                R.id.radioEntryTxt -> "txt"
-                R.id.radioEntryBoth -> "both"
-                else -> "type"
-            }
-            prefs.edit().putString("entry_mode", mode).apply()
-        }
+        // entry is strictly "type into field" now - no output mode selector
 
         // ---- Mic Bubble ----
         val swBubble = findViewById<SwitchMaterial>(R.id.switchBubble)
@@ -256,3 +242,4 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 }
+

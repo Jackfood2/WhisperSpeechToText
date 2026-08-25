@@ -35,16 +35,11 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Voice Typing Output + Accuracy -->
+        <!-- Voice Typing Accuracy -->
         <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
-                <TextView android:text="Voice Typing Output" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <TextView android:text="Also on keyboard: Type / Save TXT / Both  •  LIVE preview  •  VAD auto-stop  •  BT mic" android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <RadioGroup android:id="@+id/radioEntryMode" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
-                    <RadioButton android:id="@+id/radioEntryType" android:text="Type into focus area (keyboard)" android:textSize="13sp" android:textColor="#212121" android:checked="true"/>
-                    <RadioButton android:id="@+id/radioEntryTxt" android:text="Save to TXT — Documents/WhisperNotes/" android:textSize="13sp" android:textColor="#212121"/>
-                    <RadioButton android:id="@+id/radioEntryBoth" android:text="Both — type + save TXT" android:textSize="13sp" android:textColor="#212121"/>
-                </RadioGroup>
+                <TextView android:text="Voice Typing" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <TextView android:text="Speech is typed directly into the focused field in ~30s chunks as you pause. No TXT files." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
 
                 <TextView android:text="Accuracy" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp"/>
                 <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp">

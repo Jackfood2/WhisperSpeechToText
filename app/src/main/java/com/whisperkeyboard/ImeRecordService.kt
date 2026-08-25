@@ -3,6 +3,7 @@ package com.whisperkeyboard
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.Build
@@ -26,16 +27,30 @@ class ImeRecordService : Service() {
         }
     }
     private fun notif(): Notification {
+        val stopIntent = PendingIntent.getService(
+            this, 1,
+            Intent(this, ImeRecordService::class.java).setAction("STOP_RECORDING"),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         return NotificationCompat.Builder(this, "whisper_ime")
-            .setContentTitle("Whisper Speech to Text")
-            .setContentText("Listening... tap Stop on keyboard")
+            .setContentTitle("Whisper - recording voice typing")
+            .setContentText("Recording continues on lock screen")
             .setSmallIcon(android.R.drawable.presence_audio_online)
             .setOngoing(true)
+            .addAction(0, "■ Stop Recording", stopIntent)
             .build()
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             "START" -> startForeground(102, notif())
+            "STOP_RECORDING" -> {
+                // from the notification Stop button (works on lock screen):
+                // end the recording; queued chunks keep processing in background
+                WhisperKeyboardService.stopHook?.invoke()
+                WhisperKeyboardService.stopHook = null
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
             "STOP" -> {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()

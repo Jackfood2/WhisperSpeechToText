@@ -25,7 +25,13 @@ object WhisperEngine {
 
     private external fun nativeInit(modelPath: String): Long
     private external fun nativeFree()
+    private external fun nativeCancel()
     private external fun nativeTranscribe(modelPath: String, wavPath: String, lang: String): String
+
+    /** Abort the in-flight transcription ASAP (progress callback returns abort). */
+    fun cancelCurrent() {
+        try { nativeCancel() } catch (e: Throwable) { AppLog.w(TAG, "cancel: ${e.message}") }
+    }
 
     /** Preload/cache the model with retries. No-op if already loaded for this path. */
     fun ensureModel(modelPath: String): Boolean {

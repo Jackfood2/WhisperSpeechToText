@@ -166,6 +166,7 @@ object TranscriptionQueue {
     fun isPaused(): Boolean = paused.get()
     /** True when nothing is being transcribed and nothing is pending. */
     fun isActive(): Boolean = isProcessing || pendingCount.get() > 0
+    fun pendingCount(): Int = pendingCount.get()
 
     /** Discard the result of the currently processing job when it finishes; continue with next. */
     fun skipCurrentJob() {
@@ -177,6 +178,7 @@ object TranscriptionQueue {
         AppLog.i(TAG, "STOP ALL requested")
         skipCurrentFlag.set(true)
         stopAllFlag.set(true)
+        WhisperEngine.cancelCurrent()
         paused.set(false)
         return clearQueue()
     }
@@ -193,7 +195,14 @@ object TranscriptionQueue {
         ensureWorker()
     }
 
-    fun pause() { paused.set(true); Log.i(TAG, "Queue paused") }
+    fun pause() {
+        paused.set(true)
+        // drop the in-flight job too - user wants immediate response, not a long tail
+        skipCurrentFlag.set(true)
+        WhisperEngine.cancelCurrent()
+        Log.i(TAG, "Queue paused (current job cancelled)")
+        AppLog.i(TAG, "paused - current job cancelled")
+    }
     fun resume() { if (paused.compareAndSet(true, false)) { Log.i(TAG, "Queue resumed"); ensureWorker() } }
     fun togglePause(): Boolean = if (paused.get()) { resume(); false } else { pause(); true }
 
@@ -202,7 +211,12 @@ object TranscriptionQueue {
         queue.drainTo(drained)
         var deleted = 0
         for (j in drained) { try { if (j.wavFile.exists()) { j.wavFile.delete(); deleted++ } } catch (_: Exception) {} ; pendingCount.decrementAndGet() }
-        Log.i(TAG, "Cleared $deleted queued files")
+        // also cancel + discard whatever is processing right now
+        skipCurrentFlag.set(true)
+        WhisperEngine.cancelCurrent()
+        completedCount.set(submittedCount.get())
+        Log.i(TAG, "Cleared $deleted queued files (+cancelled current)")
+        AppLog.i(TAG, "clearQueue: $deleted dropped, current cancelled")
         return deleted
     }
 
@@ -275,7 +289,8 @@ object TranscriptionQueue {
                         }
                     }
                     if (!success && errorMsg.isEmpty()) errorMsg = "Unknown error"
-                    if (!success) {
+                    val wasCancelled = errorMsg.contains("cancelled")
+                    if (!success && !wasCancelled) {
                         try {
                             val failDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes/failed")
                             failDir.mkdirs()
@@ -301,8 +316,8 @@ object TranscriptionQueue {
                     } catch (_: Exception) {}
                     val skipped = skipCurrentFlag.getAndSet(false)
                     val stoppedAll = stopAllFlag.get()
-                    if (skipped || stoppedAll) {
-                        AppLog.i(TAG, "job dropped (${if (skipped) "skipped" else "stop-all"}) - result discarded")
+                    if (skipped || stoppedAll || wasCancelled) {
+                        AppLog.i(TAG, "job dropped (${if (wasCancelled) "cancelled" else if (skipped) "skipped" else "stop-all"}) - result discarded")
                     } else if (success) job.onResult(resultText) else job.onError(errorMsg)
                     notifyProgress(0)
                 } catch (t: Throwable) {

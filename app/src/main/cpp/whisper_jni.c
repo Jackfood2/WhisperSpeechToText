@@ -12,6 +12,29 @@
 // ---- Cached model context (loaded once, reused across transcriptions) ----
 static struct whisper_context *g_ctx = NULL;
 static char g_model_path[1024] = {0};
+static volatile int g_cancel = 0;
+
+// Abort hooks - whisper_full checks these during compute; return true to cancel
+static bool abort_cb(void * user_data)
+{
+    (void)user_data;
+    return g_cancel != 0;
+}
+
+// If encoder_begin_callback returns false, the computation is aborted
+static bool encoder_begin_cb(struct whisper_context *ctx, struct whisper_state *state, void *user_data)
+{
+    (void)ctx; (void)state; (void)user_data;
+    return g_cancel == 0;
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_whisperkeyboard_WhisperEngine_nativeCancel(
+    JNIEnv *env, jobject thiz)
+{
+    g_cancel = 1;
+    return 0;
+}
 
 // Caller must serialize access (Kotlin side holds a lock around all native calls)
 static struct whisper_context *ensure_context(const char *model_path)
@@ -194,6 +217,10 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
     params.single_segment = false;
     params.no_context = true;
     params.n_threads = 4;
+    params.abort_callback = abort_cb;
+    params.abort_callback_user_data = NULL;
+    params.encoder_begin_callback = encoder_begin_cb;
+    params.encoder_begin_callback_user_data = NULL;
 
     // Set language
     if (strcmp(lang, "auto") != 0 && strlen(lang) > 0) {
@@ -203,17 +230,19 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
     }
 
     // Run transcription
+    g_cancel = 0;
     whisper_reset_timings(ctx);
     LOGI("Starting whisper_full...");
 
     if (whisper_full(ctx, params, audio_data, num_samples) != 0) {
-        LOGE("whisper_full failed");
+        const char *why = g_cancel ? "ERROR: cancelled" : "ERROR: whisper_full failed";
+        LOGE("whisper_full failed (cancel=%d)", g_cancel);
         free(audio_data);
         // ctx stays cached (freed via nativeFree)
         (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
         (*env)->ReleaseStringUTFChars(env, jWavPath, wav_path);
         (*env)->ReleaseStringUTFChars(env, jLang, lang);
-        return (*env)->NewStringUTF(env, "ERROR: whisper_full failed");
+        return (*env)->NewStringUTF(env, why);
     }
 
     whisper_print_timings(ctx);

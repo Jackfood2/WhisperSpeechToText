@@ -4,59 +4,71 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="#1E1E2E"
-    android:padding="6dp">
+    android:padding="8dp">
 
-    <!-- Status + close -->
-    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
-        <TextView android:id="@+id/tvStatus" android:text="Tap the mic to start voice typing" android:textColor="#EAEAF2" android:textSize="12sp" android:textStyle="bold" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1"/>
-        <Button android:id="@+id/btnCloseKeyboard" android:text="X" android:layout_width="40dp" android:layout_height="34dp" android:layout_marginStart="6dp" android:minWidth="0dp" android:paddingStart="0dp" android:paddingEnd="0dp" android:textSize="14sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#3A3A5C" android:contentDescription="Close keyboard (processing continues)"/>
+    <!-- ===== SIMPLE MODE (default): status, close, big mic, backspace, enter, gear ===== -->
+    <LinearLayout android:id="@+id/simpleLayout" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content">
+
+        <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+            <TextView android:id="@+id/tvStatus" android:text="Tap the mic and speak" android:textColor="#EAEAF2" android:textSize="12sp" android:textStyle="bold" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1"/>
+            <Button android:id="@+id/btnKeyboardGear" android:text="⚙" android:layout_width="38dp" android:layout_height="34dp" android:minWidth="0dp" android:paddingStart="0dp" android:paddingEnd="0dp" android:textSize="15sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#3A3A5C"/>
+            <Button android:id="@+id/btnCloseKeyboard" android:text="X" android:layout_width="38dp" android:layout_height="34dp" android:layout_marginStart="4dp" android:minWidth="0dp" android:paddingStart="0dp" android:paddingEnd="0dp" android:textSize="14sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#3A3A5C" android:contentDescription="Close keyboard (processing continues)"/>
+        </LinearLayout>
+
+        <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="6dp">
+
+            <!-- Big circular record button -->
+            <FrameLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content">
+                <Button android:id="@+id/btnMicCircle" android:text="🎤" android:textSize="26sp" android:layout_width="84dp" android:layout_height="84dp" android:layout_gravity="center_horizontal" android:insetTop="0dp" android:insetBottom="0dp" android:padding="0dp" android:textColor="#FFFFFF" android:backgroundTint="#00B894" android:contentDescription="Record"/>
+            </FrameLayout>
+
+            <!-- Right column: backspace + enter -->
+            <LinearLayout android:orientation="vertical" android:layout_width="wrap_content" android:layout_height="wrap_content">
+                <Button android:id="@+id/btnBackspace" android:text="⌫" android:layout_width="58dp" android:layout_height="40dp" android:textSize="17sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#3A3A5C" android:contentDescription="Delete last word (hold = repeat)"/>
+                <Button android:id="@+id/btnEnter" android:text="⏎" android:layout_width="58dp" android:layout_height="40dp" android:layout_marginTop="4dp" android:textSize="16sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#3A3A5C" android:contentDescription="New line"/>
+            </LinearLayout>
+        </LinearLayout>
     </LinearLayout>
 
-    <!-- One-button mic (toggles Speak/Stop) + backspace -->
-    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
-        <Button android:id="@+id/btnMic" android:text="🎤 Speak" android:layout_width="0dp" android:layout_weight="4" android:layout_height="52dp" android:textSize="16sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#00B894"/>
-        <Button android:id="@+id/btnBackspace" android:text="⌫" android:layout_width="0dp" android:layout_weight="1" android:layout_height="52dp" android:layout_marginStart="6dp" android:textSize="20sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#3A3A5C" android:contentDescription="Delete last word (hold = repeat)"/>
+    <!-- ===== SETTINGS PANEL (revealed by gear) ===== -->
+    <LinearLayout android:id="@+id/settingsPanel" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone">
+
+        <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+            <TextView android:text="⚙ Keyboard Settings" android:textStyle="bold" android:textSize="14sp" android:textColor="#FFFFFF" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
+            <Button android:id="@+id/btnPanelDone" android:text="Done ▸" android:layout_width="wrap_content" android:layout_height="34dp" android:minWidth="0dp" android:paddingStart="12dp" android:paddingEnd="12dp" android:textSize="12sp" android:textStyle="bold" android:textColor="#212121" android:backgroundTint="#FDCB6E"/>
+        </LinearLayout>
+
+        <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="6dp">
+            <TextView android:text="Model:" android:textSize="11sp" android:textColor="#D5D5E8" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingEnd="6dp"/>
+            <Button android:id="@+id/btnModelTiny" android:text="tiny" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
+            <Button android:id="@+id/btnModelBase" android:text="base" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
+            <Button android:id="@+id/btnModelSmall" android:text="small" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#00B894"/>
+            <Button android:id="@+id/btnModelMedium" android:text="medium" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
+        </LinearLayout>
+
+        <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="4dp">
+            <Button android:id="@+id/btnVad" android:text="VAD: ON" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#00B894"/>
+            <Button android:id="@+id/btnLang" android:text="Lang: auto" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
+            <Button android:id="@+id/btnBt" android:text="BT: OFF" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
+            <Button android:id="@+id/btnCaps" android:text="Caps: AUTO" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
+        </LinearLayout>
+
+        <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:layout_marginTop="6dp">
+            <Button android:id="@+id/btnPause" android:text="Pause" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
+            <Button android:id="@+id/btnClear" android:text="Clear Queue" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="4dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
+            <Button android:id="@+id/btnRetry" android:text="Retry Failed" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="4dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#212121" android:backgroundTint="#FDCB6E"/>
+        </LinearLayout>
     </LinearLayout>
 
-    <!-- Progress + batch position -->
-    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="6dp">
+    <!-- Always visible: progress + processing controls + badge -->
+    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="8dp">
         <ProgressBar android:id="@+id/progressTranscribe" style="?android:attr/progressBarStyleHorizontal" android:layout_width="0dp" android:layout_weight="1" android:layout_height="8dp" android:max="100" android:progress="0" android:progressTint="#00B894"/>
         <TextView android:id="@+id/tvProgressPct" android:text="0%" android:textSize="12sp" android:textStyle="bold" android:textColor="#FFD54F" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="end" android:paddingStart="6dp" android:minWidth="64dp"/>
     </LinearLayout>
 
-    <!-- Processing controls: visible only while queue busy -->
     <LinearLayout android:id="@+id/rowProcessing" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:layout_marginTop="4dp" android:visibility="gone">
         <Button android:id="@+id/btnSkipOne" android:text="Skip 1 ▸" android:layout_width="0dp" android:layout_weight="1" android:layout_height="30dp" android:textSize="11sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#E17055"/>
         <Button android:id="@+id/btnStopAll" android:text="■ Stop All" android:layout_width="0dp" android:layout_weight="1" android:layout_height="30dp" android:layout_marginStart="6dp" android:textSize="11sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#D63031"/>
-    </LinearLayout>
-
-    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="6dp">
-        <TextView android:text="Model:" android:textSize="11sp" android:textColor="#D5D5E8" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingEnd="6dp"/>
-        <Button android:id="@+id/btnModelTiny" android:text="tiny" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
-        <Button android:id="@+id/btnModelBase" android:text="base" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
-        <Button android:id="@+id/btnModelSmall" android:text="small" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#00B894"/>
-        <Button android:id="@+id/btnModelMedium" android:text="medium" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
-    </LinearLayout>
-
-    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="4dp">
-        <TextView android:text="Output:" android:textSize="11sp" android:textColor="#D5D5E8" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingEnd="6dp"/>
-        <Button android:id="@+id/btnModeType" android:text="Type" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#00B894"/>
-        <Button android:id="@+id/btnModeTxt" android:text="Save TXT" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
-        <Button android:id="@+id/btnModeBoth" android:text="Both" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
-    </LinearLayout>
-
-    <!-- Accuracy UX row: VAD / LIVE / BT / Caps -->
-    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="4dp">
-        <Button android:id="@+id/btnVad" android:text="VAD: ON" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#00B894"/>
-        <Button android:id="@+id/btnLive" android:text="LIVE: ON" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#00B894"/>
-        <Button android:id="@+id/btnBt" android:text="BT: OFF" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
-        <Button android:id="@+id/btnCaps" android:text="Caps: AUTO" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="3dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
-    </LinearLayout>
-
-    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:layout_marginTop="6dp">
-        <Button android:id="@+id/btnPause" android:text="Pause" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
-        <Button android:id="@+id/btnClear" android:text="Clear Queue" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="4dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#636E72"/>
-        <Button android:id="@+id/btnRetry" android:text="Retry Failed" android:layout_width="0dp" android:layout_weight="1" android:layout_height="32dp" android:layout_marginStart="4dp" android:textSize="10sp" android:textStyle="bold" android:textColor="#212121" android:backgroundTint="#FDCB6E"/>
     </LinearLayout>
 
     <TextView android:id="@+id/tvQueueBadge" android:text="" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFD54F" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:paddingTop="4dp"/>
