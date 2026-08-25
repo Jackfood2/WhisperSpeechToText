@@ -67,7 +67,12 @@
                 <TextView android:text="Auto-stop recording after silence (VAD ON)" android:textStyle="bold" android:textSize="13sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
                 <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
                     <SeekBar android:id="@+id/seekStopSilence" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:min="5" android:max="60"/>
-                    <TextView android:id="@+id/tvStopSilence" android:text="10s" android:textStyle="bold" android:textColor="#212121" android:textSize="13sp" android:layout_width="40dp" android:layout_height="wrap_content" android:gravity="end"/>
+                    <TextView android:id="@+id/tvStopSilence" android:text="10s" android:textStyle="bold" android:textColor="#212121" android:textSize="13sp" android:layout_width="52dp" android:layout_height="wrap_content" android:gravity="end"/>
+                </LinearLayout>
+                <TextView android:text="Unload model when idle (battery saver)" android:textStyle="bold" android:textSize="13sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+                <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                    <SeekBar android:id="@+id/seekUnloadIdle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:min="0" android:max="12"/>
+                    <TextView android:id="@+id/tvUnloadIdle" android:text="60s" android:textStyle="bold" android:textColor="#212121" android:textSize="13sp" android:layout_width="64dp" android:layout_height="wrap_content" android:gravity="end"/>
                 </LinearLayout>
                 <TextView android:text="Shorter pause = faster text delivery. Applies to the next recording." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"/>
                 <TextView android:text="VAD: silence 1.3s → auto Stop. LIVE: composing preview while speaking. BT: VOICE_COMMUNICATION." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>

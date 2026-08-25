@@ -140,6 +140,22 @@ class SettingsActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(sb: SeekBar?) { saved() }
         })
 
+        // ---- Unload model when idle (0 = keep in memory) ----
+        val seekUnload = findViewById<SeekBar>(R.id.seekUnloadIdle)
+        val tvUnload = findViewById<TextView>(R.id.tvUnloadIdle)
+        fun unloadLabel(p: Int) = if (p == 0) "Never" else "${p * 30}s"
+        val savedUnload = prefs.getInt("unload_idle_ticks", 2) // ticks of 30s; default 60s
+        seekUnload.progress = savedUnload.coerceIn(0, 12)
+        tvUnload.text = unloadLabel(savedUnload)
+        seekUnload.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                tvUnload.text = unloadLabel(p)
+                if (fromUser) prefs.edit().putInt("unload_idle_ticks", p).apply()
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) { saved() }
+        })
+
         spinnerModel.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) {
                 val prev = prefs.getString("model", "small")

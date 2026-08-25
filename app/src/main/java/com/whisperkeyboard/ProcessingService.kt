@@ -28,14 +28,20 @@ class ProcessingService : Service() {
             val nm = getSystemService(NotificationManager::class.java)
             if (!busy) {
                 idleTicks++
-                // battery protection: ~45s of quiet -> release the cached whisper model
-                if (idleTicks == 45) {
+                // battery protection: unload the cached whisper model after the user-configured
+                // idle window (unload_idle_ticks x 30s; 0 = keep in memory). Applies to bubble AND keyboard.
+                val ticksAllowed = getSharedPreferences("whisper", MODE_PRIVATE).getInt("unload_idle_ticks", 2) * 30 // seconds (ticks are ~1s)
+                if (ticksAllowed > 0 && idleTicks == ticksAllowed) {
                     Thread { WhisperEngine.unloadIfIdle() }.start()
                 }
-                if (idleTicks >= 50) {
+                if (ticksAllowed in 1..(idleTicks + 5) && idleTicks >= ticksAllowed + 5) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                     return
+                }
+                // safety: even with unload disabled, don't poll forever when there is nothing to watch
+                if (ticksAllowed == 0 && idleTicks >= 90) {
+                    stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); return
                 }
                 nm?.notify(NOTIF_ID, buildNotif(0, 0, 0))
             } else {

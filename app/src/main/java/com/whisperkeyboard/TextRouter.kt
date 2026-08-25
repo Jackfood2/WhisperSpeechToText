@@ -68,7 +68,7 @@ object TextRouter {
         if (ic != null && pm?.isInteractive != false) {
             ic.commitText("$capped ", 1)
             AppLog.i(TAG, "typed via IME: ${capped.take(50)}")
-            toastIt("Typed: ${capped.take(40)}")
+            toastIt("Delivered")
             finish()
             return
         }
@@ -77,7 +77,7 @@ object TextRouter {
             val ok = WhisperAccessibilityService.paste("$capped ")
             if (ok) {
                 AppLog.i(TAG, "pasted via a11y: ${capped.take(50)}")
-                toastIt("Typed: ${capped.take(40)}")
+                toastIt("Delivered")
                 finish()
                 return
             }

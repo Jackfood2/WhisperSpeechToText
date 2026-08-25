@@ -57,6 +57,8 @@ class QuickSwitchService : Service() {
     @Volatile private var state = STATE_IDLE
     @Volatile private var recActive = false
     private var recThread: Thread? = null
+    @Volatile private var activeBubbleRecorder: AudioRecord? = null
+    private var fnameCounter = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -222,9 +224,12 @@ class QuickSwitchService : Service() {
             var chunkStartMs = 0L
             var gotVoice = false
             try {
+                // make sure the previous session's recorder/thread is fully gone before capturing
+                try { recThread?.join(800) } catch (_: Exception) {}
                 val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
                 val rec = AudioRecord(MediaRecorder.AudioSource.MIC, 16000, AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf, 32000))
+                activeBubbleRecorder = rec
                 rec.startRecording()
                 val buf = ByteArray(4096)
                 while (recActive) {
@@ -260,6 +265,7 @@ class QuickSwitchService : Service() {
                     }
                 }
                 try { rec.stop(); rec.release() } catch (_: Exception) {}
+                activeBubbleRecorder = null
                 flushChunk(pcmChunk, model, lang) // final partial chunk
                 finalFlushPending = false
             } catch (e: Throwable) {
@@ -280,6 +286,7 @@ class QuickSwitchService : Service() {
     private fun stopRec() {
         if (!recActive) return
         recActive = false
+        try { activeBubbleRecorder?.stop() } catch (_: Exception) {} // unblock read() NOW
         finalFlushPending = true
         setState(STATE_PROC, "Recording stopped - processing...")
         AppLog.i("Bubble", "recording stopped by tap")
@@ -321,9 +328,10 @@ class QuickSwitchService : Service() {
             return
         }
         val ts = System.currentTimeMillis()
-        val pcm = File(cacheDir, "bubble_$ts.pcm")
+        fnameCounter++
+        val pcm = File(cacheDir, "bubble_${ts}_$fnameCounter.pcm")
         FileOutputStream(pcm).use { it.write(bytes) }
-        val wav = File(cacheDir, "bubble_$ts.wav")
+        val wav = File(cacheDir, "bubble_${ts}_$fnameCounter.wav")
         AudioUtils.pcmToWav(pcm, wav)
         pcm.delete()
         TranscriptionQueue.enqueue(
