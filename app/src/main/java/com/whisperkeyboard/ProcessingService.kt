@@ -82,7 +82,11 @@ class ProcessingService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
 
-    private fun buildNotif(queued: Int, typing: Int, held: Int): Notification {
+    private fun buildNotif(queued: Int, typing: Int, held: Int, pausedMark: String = ""): Notification {
+        val contentIntent = android.app.PendingIntent.getActivity(
+            this, 21,
+            Intent(this, MainActivity::class.java).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
         val parts = mutableListOf<String>()
         if (queued > 0) parts.add("transcribing $queued chunk(s)")
         if (typing > 0) parts.add("$typing waiting to type in")
