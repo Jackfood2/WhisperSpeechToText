@@ -12,8 +12,8 @@ android {
         applicationId "com.whisperkeyboard"
         minSdk 26
         targetSdk 34
-        versionCode 18
-        versionName "1.9"
+        versionCode 52
+        versionName "2.3.9"
 
         ndk {
             abiFilters 'arm64-v8a'
@@ -29,10 +29,24 @@ android {
         }
     }
 
+    signingConfigs {
+        release {
+            // credentials live in ~/.gradle/gradle.properties (never committed)
+            def props = new Properties()
+            def f = rootProject.file("../gradle-signing.properties")
+            if (f.exists()) { f.withInputStream { props.load(it) } }
+            storeFile rootProject.file(props.getProperty("whisper.storeFile", "whisper.keystore"))
+            storePassword props.getProperty("whisper.storePassword", "whisper2026")
+            keyAlias props.getProperty("whisper.keyAlias", "whisper")
+            keyPassword props.getProperty("whisper.keyPassword", "whisper2026")
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
     }
 

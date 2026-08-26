@@ -30,8 +30,9 @@ class PrivacyDashboardActivity : AppCompatActivity() {
         val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             runCatching { saveCrash(e) }
-            runCatching { showErrorScreen(e) }
-            prevHandler?.uncaughtException(t, e)
+            var shown = false
+            runCatching { showErrorScreen(e); shown = true }
+            if (!shown) prevHandler?.uncaughtException(t, e) // only kill process if we could not show diagnostics
         }
         try {
             wireUi()

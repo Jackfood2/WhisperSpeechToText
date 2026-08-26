@@ -28,38 +28,54 @@
 
 ## Changelog
 
-### v2.1.5 (2026-08-25) — Bubble hardening
-- Per-session audio buffer (rapid stop/start no longer corrupts chunks), crash-safe processing flag, drag vs long-press disambiguation, mic-conflict guard.
+### v2.3.9 (2026-08-26) — Bubble mic privilege on Android 14+ ⚠️ important
+- **Root cause of "bubble records silence unless the keyboard is open":** the bubble service ran as FGS type `specialUse`, which carries **no microphone privilege**. On Android 14+/One UI, background mic capture without a `microphone`-type foreground service receives **digital silence** whenever no app component (activity/IME) is visible.
+- `QuickSwitchService` now declares `foregroundServiceType="microphone"` and passes the type to `startForeground()` explicitly.
+- Dead-stream self-heal detection lowered 5s → ~3s (covers short recordings).
 
-### v2.1.4 (2026-08-25) — Bubble yellow-state fix
-- Stop starts the completion watcher: yellow → grey automatically once delivered/held.
+### v2.3.8 (2026-08-26) — One shared mic for the whole app
+- **Process-wide AudioRecord** owned by `AudioUtils`, reused by bubble + keyboard + meeting recorder; cleanup is stop-only (**never released between sessions**).
+- Fixes two opposite failure modes at once: all-zero recordings when a new AudioRecord was created seconds after another was released (Samsung HAL), and the keyboard's mic being blocked by a held bubble recorder.
+- Mid-session self-heal: if ~3s of pure digital-zero frames arrive, the recorder is recycled automatically (`recorder recycled OK` in logs).
+- **Stuck "Recording Xs" notification fixed:** notification repaints on every state change (start/stop/processing/idle); the ■ Stop action rebuilds stale notifications instead of doing nothing.
 
-### v2.1.3 (2026-08-25) — Instant record + concurrent load
-- Mic & bubble start recording immediately; model loads in parallel; first chunk transcribes when ready.
-- Fixed bubble skipping the yellow state after stop.
+### v2.3.7 (2026-08-26) — interim notification lifecycle fixes (superseded by v2.3.8's shared-mic design)
 
-### v2.1.2 (2026-08-25) — Clipboard fallback + paste reliability
-- Held transcripts auto-copied to clipboard; accessibility paste searches all windows; one-time bridge hint.
+### v2.3.6 (2026-08-26) — Five bubble reliability bugs
+- **Dead-bubble lockup:** mic failure left `recActive=true` → every tap ignored until reboot. Now always cleared.
+- **Silence-chunk spam:** long pauses produced endless silence-only chunks ("No speech in chunk" toasts). Per-chunk voice gating added.
+- **Gestures corrected:** tap = record/stop · hold ≥450ms = switch keyboard · drag = reposition (previously stationary long-press accidentally started recordings, and keyboard-switch required hold+wiggle).
+- Mic leak on bubble disable (keyboard then failed with "Mic did not start").
+- Duplicate model-load thread removed.
 
-### v2.1.1 (2026-08-25) — Bubble lock-screen + empty-chunk fixes
-- Wakelock + lock-screen overlay for bubble recording; voice-gated chunking (no leading-silence chunks); silent chunks pre-dropped.
+### v2.3.5 (2026-08-26) — Dashboard crash fixed ⚠️ critical
+- `PrivacyDashboardActivity` was **missing from AndroidManifest.xml** (corrupted during an automated edit) — tapping Privacy Dashboard / Logs crashed instantly with `ActivityNotFoundException`. Manifest repaired; verified in built APK.
+- Crash handler hardened: on-screen diagnostics keep the process alive instead of delegating to the system killer.
 
-### v2.1 (2026-08-25) — 3-state bubble
-- Grey/Green/Yellow tap-to-record states with toasts; long-press switches keyboard.
+### v2.3.4 (2026-08-26) — Status & polish
+- Keyboard status no longer stuck at "Transcribing chunk… 18%": shows "All chunks processed ✓" once queue drains.
 
-### v2.0.x (2026-08-25) — Simplified keyboard + app-first settings
-- Keyboard = mic circle + backspace + gear(app settings) + close; chunked invisible stop-start engine; outstanding-transcript resume flow; signed release APK; Play Protect guidance.
+### v2.3.3 (2026-08-26) — First words no longer cut off
+- Removed a destructive 64KB drain that ate live audio right after tapping record — speech onset is preserved from frame one.
 
-### v1.9.x (2026-08-24/25) — Resume flow era
-- Outstanding transcripts, dynamic backspace, TextRouter (IME → a11y paste → held), processing notification on lock screen, battery-aware model unload.
+### v2.3.2 (2026-08-25) — Live notifications
+- Bubble notification: live elapsed timer ("Recording 12s"), ■ Stop + Keyboard actions, visible on lock screen.
+- Processing notification: tap opens app; shows `[QUEUE PAUSED]` marker.
 
-### v1.1 (2026-08-24) — Accuracy UX + UI polish
-- **High-contrast UI:** `#212121` on `#FFFFFF` cards with `stroke #E0E0E0`, 13sp+ fonts; spinner selected + dropdown now **black on white** (`spinner_item.xml`, `spinner_dropdown_item.xml`) — no more grey-on-white.
-- **Accuracy UX on keyboard:** `VAD: ON/OFF` (1.3s silence auto-Stop via RMS), `LIVE: ON/OFF` (1.6s preview via `setComposingText`), `BT: ON/OFF` (`VOICE_COMMUNICATION` + SCO), `Caps: AUTO/ON/OFF` + `isNoSpeechText` filter.
-- **Privacy Dashboard & Logs** (`PrivacyDashboardActivity`): per-model adaptive baseline `ratio_*` + `count_*` in `whisper_stats`, stored models, `WhisperNotes/*.txt` count, toggles dump, recent transcript preview; Reset/Copy/Clear.
-- **Save Settings instant:** `Save Settings (updates keyboard instantly)` button + `SharedPreferences.OnSharedPreferenceChangeListener` in IME — change in app reflects on keyboard without reopening.
-- **Adaptive progress fix:** per-model learned `avgRatio` (`transcribeSec/audioSec`) with global fallback, creep 88→98% after expected, `recordStats()` after each job.
-- **Lock-screen:** `ImeRecordService` + `MeetingRecordService` `PARTIAL_WAKE_LOCK` + `microphone` foreground.
+### v2.3–v2.3.1 (2026-08-25) — Persistent recorder era
+- Shared persistent recorder + session generations, deterministic thread handoff, delivery-time IME activation, clipboard fallback on parked transcripts.
+
+### v2.2.x (2026-08-25) — Stability wave
+- Voice-gated chunking, wakelock + lock-screen overlay, BT-aware recorder, lenient VAD gate (0.008), crash-proof dashboard errors (on-screen + clipboard), configurable model-unload timeout (Never/30s–360s), accurate idle countdown.
+
+### v2.1.x (2026-08-25) — Bubble foundations
+- 3-state grey/green/yellow bubble, per-session buffers, instant record + concurrent model load, clipboard fallback + paste reliability, yellow→grey completion watcher.
+
+### v2.0.x (2026-08-25) — Simplified keyboard + chunked engine
+- Mic circle + ⌫ + ⏎ + gear + X keyboard; invisible stop/start chunked transcription (first-15s rule); outstanding-transcript resume; signed release APK + Play Protect guidance; auto-save settings.
+
+### v1.x (2026-08-24/25) — Foundations
+- Queue system, adaptive per-model progress, high-contrast UI, Privacy Dashboard & logs, lock-screen recording services, resume flow, TextRouter delivery chain (IME → accessibility paste → held).
 
 ![Android](https://img.shields.io/badge/Android-8.0%2B-brightgreen)
 ![Kotlin](https://img.shields.io/badge/Kotlin-1.9-blue)
@@ -104,10 +120,20 @@ The bubble lets you dictate into **any app, from anywhere**, including with anot
 | 🟢 Green | Recording | **Stop** → chunks transcribe immediately |
 | 🟡 Yellow | Processing | Start a **new** recording anytime (previous keeps processing) |
 
+- **Gestures:** quick **tap** = record/stop · **hold ≥0.5s** = switch Whisper keyboard ↔ default · **drag** = reposition.
+- **Notification actions** (also on lock screen): live "Recording Xs" timer, **■ Stop**, **Keyboard** switch. The notification always reflects the true state — it can never freeze on an old timer.
 - Yellow returns to grey automatically when every chunk is typed/held.
-- **Drag** to reposition. **Long-press (≥0.5s)** = switch to Whisper keyboard / back to default.
 - Works on the **lock screen** (tap to stop there too).
 - If no text field can receive the transcript, it's **parked**: a notification counts it, it's **copied to the clipboard**, and the keyboard shows a blue *"Type pending transcript"* button — one tap inserts each entry.
+
+### Typing into other apps — pick ONE of these two delivery paths
+
+| Path | Setup | Best for |
+|---|---|---|
+| **A. Direct typing (recommended)** | One-time: `adb shell pm grant com.whisperkeyboard android.permission.WRITE_SECURE_SETTINGS` | Bubble auto-switches to the Whisper keyboard at stop and types via `InputConnection`. **No accessibility needed — banking apps stay happy.** Grant survives reboots/updates; only re-run after uninstalling. |
+| **B. Typing Bridge (accessibility)** | Enable *Whisper Typing Bridge* in Accessibility settings | Types while ANY keyboard stays active — but many banking apps flag enabled accessibility services as suspicious. Disable if your bank complains. |
+
+Delivery order is automatic: direct IME typing first, accessibility paste second, park+clipboard last.
 
 ## Quick Start (User)
 
@@ -202,6 +228,9 @@ If this saves you time, support offline development — **PayPal: jackfood2004@g
 ## Troubleshooting
 
 - **No text inserted:** long-press spacebar → switch input to Whisper Speech to Text.
+- **Bubble records silence / "No speech captured":** update to **v2.3.9+** — earlier builds lacked the `microphone` foreground-service type, so Android 14+ served digital silence when no app window was visible. After install, reopen the app once so the bubble service restarts with the new type.
+- **Keyboard mic dead after using the bubble:** fixed in v2.3.8 (one shared, never-released recorder). Old versions: toggle the bubble off/on once to release the mic.
+- **Banking app blocks/warns:** disable *Whisper Typing Bridge* (accessibility) and use Path A (`WRITE_SECURE_SETTINGS` grant) — see delivery paths above.
 - **Download failed:** grant `INTERNET` (built-in), check WiFi, retry.
 - **Battery kills meeting:** `Settings → Apps → Whisper Speech to Text → Battery → Unrestricted`.
 - **Progress stuck at 92%:** old APK; reinstall this version — adaptive baseline fixes it after 2–3 uses.

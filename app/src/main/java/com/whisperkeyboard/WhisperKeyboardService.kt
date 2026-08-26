@@ -395,21 +395,22 @@ class WhisperKeyboardService : InputMethodService() {
                     } else if (read < 0) break
                 }
                 try { recorder.stop() } catch (_: Exception) {}
-                try { recorder.release() } catch (_: Exception) {}
+                // shared recorder stays alive for bubble/next session (never release)
                 activeRecorder = null
                 // final partial chunk
                 flushChunk(pcmChunk, selModel)
             } catch (e: Throwable) {
                 AppLog.e(TAG, "recording error: ${e.message}")
                 handler.post { updateStatus("Error: ${e.message}"); Toast.makeText(this@WhisperKeyboardService, "Mic error: ${e.message}", Toast.LENGTH_LONG).show() }
-                try { activeRecorder?.release() } catch (_: Exception) {}
+                try { activeRecorder?.stop() } catch (_: Exception) {}
                 activeRecorder = null
             } finally {
                 imeRecording = false
                 stopHook = null
                 handler.post {
                     resetMicButton()
-                    updateStatus("Ready - chunks still processing")
+                    val done = !TranscriptionQueue.isActive() && TextRouter.pendingTypingCount() == 0
+                    updateStatus(if (done) "All chunks processed ✓" else "Ready - chunks still processing")
                     updateQueueBadge()
                 }
                 handler.postDelayed({ if (!isRecording.get()) stopImeForeground() }, 1500)
@@ -532,7 +533,8 @@ class WhisperKeyboardService : InputMethodService() {
         stopHook = null
         activeIC = null
         try { activeRecorder?.stop() } catch (_: Exception) {}
-        try { activeRecorder?.release() } catch (_: Exception) {}
+        // shared recorder stays alive process-wide (never release)
+        activeRecorder = null
         stopImeForeground()
         super.onDestroy()
     }

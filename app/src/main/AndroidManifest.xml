@@ -34,7 +34,11 @@
         <activity
             android:name=".SettingsActivity"
             android:label="Settings"
-            android:exported="false"/> android:label="Privacy Dashboard" android:exported="false"/>
+            android:exported="false"/>
+        <activity
+            android:name=".PrivacyDashboardActivity"
+            android:label="Privacy Dashboard"
+            android:exported="false"/>
 
         <service
             android:name=".WhisperKeyboardService"
@@ -76,11 +80,7 @@
             android:name=".QuickSwitchService"
             android:label="Mic Bubble Quick Switch"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Floating bubble for one-tap switching to voice typing"/>
-        </service>
+            android:foregroundServiceType="microphone"/>
 <service
             android:name=".WhisperRecognitionService"
             android:label="Whisper Voice Typing"

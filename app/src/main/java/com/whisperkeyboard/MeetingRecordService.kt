@@ -166,7 +166,7 @@ class MeetingRecordService : Service() {
 
                 try {
                     recorder.stop()
-                    recorder.release()
+                    // shared recorder stays alive for bubble/keyboard (never release)
                 } catch (e: Exception) {
                     Log.w(TAG, "Recorder stop error: ${e.message}")
                 }

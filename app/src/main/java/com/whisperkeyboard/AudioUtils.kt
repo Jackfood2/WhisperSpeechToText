@@ -15,8 +15,36 @@ object AudioUtils {
     const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
     const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
 
-    fun createRecorder(context: Context? = null): AudioRecord {
+    /**
+     * Process-wide SHARED recorder. Samsung (and some other) HALs return an all-zero stream
+     * when an AudioRecord is created seconds after another was released - and keep the mic
+     * hostage when one is held open. One instance for the whole app, serialized by callers
+     * (bubble and keyboard never record simultaneously), fixes both failure modes.
+     */
+    @Volatile private var sharedRec: AudioRecord? = null
+    @Volatile private var sharedBt: Boolean? = null
+
+    /** Returns the shared recorder, (re)building it only when missing/unhealthy/BT-mode changed. */
+    fun createRecorder(context: Context? = null): AudioRecord = synchronized(this) {
         val useBt = context?.getSharedPreferences("whisper", Context.MODE_PRIVATE)?.getBoolean("bt_mic", false) == true
+        sharedRec?.let { existing ->
+            if (existing.state == AudioRecord.STATE_INITIALIZED && sharedBt == useBt) return existing
+            try { existing.release() } catch (_: Exception) {}
+            sharedRec = null
+        }
+        val rec = buildRecorder(useBt, context)
+        if (rec.state == AudioRecord.STATE_INITIALIZED) { sharedRec = rec; sharedBt = useBt }
+        rec
+    }
+
+    /** Hard reset - only for dead-stream recovery or final app teardown. */
+    fun releaseSharedRecorder() = synchronized(this) {
+        sharedRec?.let { try { it.release() } catch (_: Exception) {} }
+        sharedRec = null
+        sharedBt = null
+    }
+
+    private fun buildRecorder(useBt: Boolean, context: Context?): AudioRecord {
         val source = if (useBt) {
             // Try VOICE_COMMUNICATION for BT headset; fallback to MIC if fails
             try {
@@ -40,7 +68,6 @@ object AudioUtils {
             AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT, bufSize)
         }
     }
-
     // RMS in 0..1 (16-bit PCM)
     fun rms16(buffer: ByteArray, readBytes: Int): Double {
         if (readBytes < 2) return 0.0
