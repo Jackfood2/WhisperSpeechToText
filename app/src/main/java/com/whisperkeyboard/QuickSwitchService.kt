@@ -219,9 +219,10 @@ class QuickSwitchService : Service() {
         val lang = prefs.getString("lang", "auto") ?: "auto"
         // per-session buffer: a fast stop/start must never share audio with the dying session
         val pcmChunk = ByteArrayOutputStream()
+        val prevThread = recThread
         recThread = Thread {
-            var lastVoiceTime = 0L
-            var chunkStartMs = 0L
+            var lastVoiceTime = System.currentTimeMillis()
+            var chunkStartMs = lastVoiceTime
             var gotVoice = false
             val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
             val chunked = prefs.getBoolean("bubble_chunked", true)
@@ -231,7 +232,7 @@ class QuickSwitchService : Service() {
             val recStartMs = System.currentTimeMillis()
             try {
                 // make sure the previous session's recorder/thread is fully gone before capturing
-                try { recThread?.join(800) } catch (_: Exception) {}
+                try { prevThread?.join(800) } catch (_: Exception) {}
                 val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
                 val rec = AudioRecord(MediaRecorder.AudioSource.MIC, 16000, AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf, 32000))
@@ -244,15 +245,10 @@ class QuickSwitchService : Service() {
                     val rms = AudioUtils.rms16(buf, n)
                     val now = System.currentTimeMillis()
                     val voiced = rms > WhisperKeyboardService.VAD_THRESH
-                    // ignore leading dead air: only buffer after the first real voice
-                    if (!gotVoice && voiced) {
-                        gotVoice = true
-                        lastVoiceTime = now
-                        chunkStartMs = now
-                    }
+                    // always buffer - preserves the very start of speech (prevents front cut)
+                    synchronized(pcmChunk) { pcmChunk.write(buf, 0, n) }
+                    if (voiced) { gotVoice = true; lastVoiceTime = now }
                     if (gotVoice) {
-                        synchronized(pcmChunk) { pcmChunk.write(buf, 0, n) }
-                        if (voiced) lastVoiceTime = now
                         val silenceFor = now - lastVoiceTime
                         val durMs = now - chunkStartMs
                         val hasContent = pcmChunk.size() >= MIN_CHUNK_BYTES // >=0.5s of audio
