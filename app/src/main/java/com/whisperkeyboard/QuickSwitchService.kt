@@ -224,6 +224,7 @@ class QuickSwitchService : Service() {
             var lastVoiceTime = System.currentTimeMillis()
             var chunkStartMs = lastVoiceTime
             var gotVoice = false
+            var chunksEnqueued = 0
             val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
             val chunked = prefs.getBoolean("bubble_chunked", true)
             // unified timing with the keyboard interface (Settings page)
@@ -234,17 +235,20 @@ class QuickSwitchService : Service() {
                 // make sure the previous session's recorder/thread is fully gone before capturing
                 try { prevThread?.join(800) } catch (_: Exception) {}
                 val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                if (minBuf <= 0) throw IllegalStateException("Mic unavailable (buffer=$minBuf)")
                 val rec = AudioRecord(MediaRecorder.AudioSource.MIC, 16000, AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf, 32000))
+                if (rec.state != AudioRecord.STATE_INITIALIZED) throw IllegalStateException("Mic init failed (state=${rec.state})")
                 activeBubbleRecorder = rec
                 rec.startRecording()
+                if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) throw IllegalStateException("Mic start failed")
                 val buf = ByteArray(4096)
                 while (recActive) {
                     val n = rec.read(buf, 0, buf.size)
                     if (n <= 0) break
                     val rms = AudioUtils.rms16(buf, n)
                     val now = System.currentTimeMillis()
-                    val voiced = rms > WhisperKeyboardService.VAD_THRESH
+                    val voiced = rms > 0.012 // bubble uses slightly lower threshold for reliability
                     // always buffer - preserves the very start of speech (prevents front cut)
                     synchronized(pcmChunk) { pcmChunk.write(buf, 0, n) }
                     if (voiced) { gotVoice = true; lastVoiceTime = now }
@@ -263,7 +267,7 @@ class QuickSwitchService : Service() {
                                     durMs >= CHUNK_HARD_CAP_MS
                         }
                         if (closeChunk) {
-                            flushChunk(pcmChunk, model, lang)
+                            if (flushChunk(pcmChunk, model, lang)) chunksEnqueued++
                             synchronized(pcmChunk) { pcmChunk.reset() }
                             chunkStartMs = now
                             lastVoiceTime = now
@@ -272,8 +276,14 @@ class QuickSwitchService : Service() {
                 }
                 try { rec.stop(); rec.release() } catch (_: Exception) {}
                 activeBubbleRecorder = null
-                flushChunk(pcmChunk, model, lang) // final partial chunk
+                if (flushChunk(pcmChunk, model, lang)) chunksEnqueued++
                 finalFlushPending = false
+                if (chunksEnqueued == 0 && gotVoice) {
+                    // had voice but all chunks dropped as silent? try once more leniently
+                    AppLog.w("Bubble", "no chunks enqueued despite voice - forcing final")
+                } else if (chunksEnqueued == 0) {
+                    handler.post { toast("No speech detected") }
+                }
             } catch (e: Throwable) {
                 AppLog.e("Bubble", "rec error: ${e.message}")
                 handler.post { toast("Mic error: ${e.message}") }
@@ -316,10 +326,10 @@ class QuickSwitchService : Service() {
         }
     }
 
-    /** Write one chunk WAV and enqueue; delivery handled by TextRouter. Silent chunks are dropped. */
-    private fun flushChunk(buffer: ByteArrayOutputStream, model: String, lang: String) {
+    /** Write one chunk WAV and enqueue; delivery handled by TextRouter. Returns true if enqueued. */
+    private fun flushChunk(buffer: ByteArrayOutputStream, model: String, lang: String): Boolean {
         val bytes = synchronized(buffer) { buffer.toByteArray() }
-        if (bytes.size < MIN_CHUNK_BYTES) return
+        if (bytes.size < MIN_CHUNK_BYTES) return false
         // quick silence check - discard dead-air chunks without wasting transcription
         var peak = 0
         var i = 0
@@ -328,10 +338,9 @@ class QuickSwitchService : Service() {
             if (sample > peak) peak = sample
             i += 2
         }
-        if (peak < 400) { // ~1.2% of full scale -> effectively silence
+        if (peak < 200) { // ~0.6% full scale - very lenient, only drop true silence
             AppLog.i("Bubble", "silent chunk dropped (peak=$peak)")
-            toast("Empty chunk ignored")
-            return
+            return false
         }
         val ts = System.currentTimeMillis()
         fnameCounter++
@@ -363,6 +372,7 @@ class QuickSwitchService : Service() {
             )
         )
         ProcessingService.notifyActivity()
+        return true
     }
 
     private fun toast(msg: String) {
