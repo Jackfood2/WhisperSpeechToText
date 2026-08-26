@@ -237,15 +237,40 @@ class QuickSwitchService : Service() {
                 val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
                 if (minBuf <= 0) throw IllegalStateException("Mic unavailable (buffer=$minBuf)")
                 val rec = AudioRecord(MediaRecorder.AudioSource.MIC, 16000, AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf, 32000))
+                    AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf * 4, 32000))
                 if (rec.state != AudioRecord.STATE_INITIALIZED) throw IllegalStateException("Mic init failed (state=${rec.state})")
                 activeBubbleRecorder = rec
-                rec.startRecording()
-                if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) throw IllegalStateException("Mic start failed")
+
+                // Some devices update recordingState asynchronously - retry instead of failing fast.
+                var started = false
+                var lastErr: Exception? = null
+                repeat(4) { attempt ->
+                    if (started) return@repeat
+                    try {
+                        rec.startRecording()
+                        Thread.sleep(80)
+                        if (rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) started = true
+                        else AppLog.w("Bubble", "start attempt $attempt not recording (state=${rec.recordingState})")
+                    } catch (e: Exception) { lastErr = e; AppLog.w("Bubble", "start attempt ${e.message}") }
+                }
+                if (!started) throw IllegalStateException("Mic did not start${lastErr?.let { ": ${it.message}" } ?: ""}")
+                AppLog.i("Bubble", "mic started ok")
+
                 val buf = ByteArray(4096)
+                var gotFirstAudio = false
+                var badReads = 0
                 while (recActive) {
-                    val n = rec.read(buf, 0, buf.size)
-                    if (n <= 0) break
+                    val n = try { rec.read(buf, 0, buf.size) } catch (e: Exception) { AppLog.e("Bubble", "read threw: ${e.message}"); -1 }
+                    if (n <= 0) {
+                        // transient errors happen (BT handoff etc.) - restart once, bail after streak
+                        badReads++
+                        AppLog.w("Bubble", "read=$n badStreak=$badReads recActive=$recActive")
+                        if (badReads == 3) { try { rec.startRecording() } catch (_: Exception) {} }
+                        if (badReads >= 8) { AppLog.e("Bubble", "giving up after $badReads bad reads"); break }
+                        continue
+                    }
+                    if (!gotFirstAudio) { gotFirstAudio = true; AppLog.i("Bubble", "audio flowing ($n bytes/frame)") }
+                    badReads = 0
                     val rms = AudioUtils.rms16(buf, n)
                     val now = System.currentTimeMillis()
                     val voiced = rms > 0.012 // bubble uses slightly lower threshold for reliability
@@ -274,6 +299,7 @@ class QuickSwitchService : Service() {
                         }
                     }
                 }
+                AppLog.i("Bubble", "loop exited (recActive=$recActive, chunks=$chunksEnqueued, gotVoice=$gotVoice)")
                 try { rec.stop(); rec.release() } catch (_: Exception) {}
                 activeBubbleRecorder = null
                 if (flushChunk(pcmChunk, model, lang)) chunksEnqueued++
