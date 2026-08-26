@@ -28,6 +28,20 @@
 
 ## Changelog
 
+### v2.4.1 (2026-08-26) — Progress % that actually adapts + single model-status notification
+- **Adaptive progress fixed:** the estimate was a cumulative mean that went stale after ~50 recordings (each new run shifted it <2%) — so the bar seemed to have "no effect" on real speed. It's now an **exponential moving average** (last ~5 runs dominate), recalculated after **every** transcription and applied to the next estimate.
+- Per-model average is used from the **first sample**; the cross-model global no longer pollutes estimates (kept for dashboard display only).
+- **One notification for load AND unload:** both states reuse the same id, so the card is always a live status. Swiping can never leave a contradictory "loaded" notice after an unload — the "unloaded" card replaces it in place and self-dismisses after 8s.
+- Settings: new toggle **"Copy outstanding transcripts to clipboard"** (see v2.4.0).
+
+### v2.4.0 (2026-08-26) — Outstanding → clipboard toggle
+- New Settings switch: when **off**, parked transcripts are *not* copied to the clipboard — they can only be retrieved via the Whisper keyboard's blue *"Type pending transcript"* insert button. Toasts and logs reflect the choice.
+
+### v2.3.10 / v2.3.11 (2026-08-26) — Model-unload countdown semantics
+- Countdown is blocked **only by real work**: active recording or transcription in flight/queued.
+- Waiting-to-type and outstanding transcripts do **not** block it (the text is already cached — whisper isn't needed to deliver it).
+- Final re-check inside the unload thread: if activity resumes at the last second (`unload skipped - activity resumed`), nothing unloads and the countdown restarts. A new recording always resets the countdown.
+
 ### v2.3.9 (2026-08-26) — Bubble mic privilege on Android 14+ ⚠️ important
 - **Root cause of "bubble records silence unless the keyboard is open":** the bubble service ran as FGS type `specialUse`, which carries **no microphone privilege**. On Android 14+/One UI, background mic capture without a `microphone`-type foreground service receives **digital silence** whenever no app component (activity/IME) is visible.
 - `QuickSwitchService` now declares `foregroundServiceType="microphone"` and passes the type to `startForeground()` explicitly.

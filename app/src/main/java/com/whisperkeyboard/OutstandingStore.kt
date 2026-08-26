@@ -41,10 +41,13 @@ object OutstandingStore {
             while (arr.length() >= MAX) { arr.remove(0) }
             arr.put(text.trim())
             prefs.edit().putString(KEY, arr.toString()).apply()
-            // convenience copy: user can also just paste it anywhere
-            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-            cm?.setPrimaryClip(android.content.ClipData.newPlainText("whisper", text.trim()))
-            AppLog.i("Outstanding", "held for later (${arr.length()} waiting) + copied to clipboard: ${text.take(50)}")
+            // optional convenience copy (Settings toggle) - off = retrieve only via keyboard button
+            val clipOn = ctx.getSharedPreferences("whisper", Context.MODE_PRIVATE).getBoolean("out_clipboard", true)
+            if (clipOn) {
+                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                cm?.setPrimaryClip(android.content.ClipData.newPlainText("whisper", text.trim()))
+            }
+            AppLog.i("Outstanding", "held for later (${arr.length()} waiting)${if (clipOn) " + copied to clipboard" else ""}: ${text.take(50)}")
             ProcessingService.notifyActivity()
             notifyChanged()
         } catch (_: Exception) {}

@@ -56,8 +56,10 @@ object TextRouter {
         if ((locked && attempt >= 4) || attempt >= MAX_ATTEMPTS) {
             val ctx = WhisperApp.holder
             if (ctx != null) {
+                val clipOn = ctx.getSharedPreferences("whisper", Context.MODE_PRIVATE).getBoolean("out_clipboard", true)
                 OutstandingStore.add(ctx, text)
-                toastIt("Held (${OutstandingStore.count(ctx)}) + copied to clipboard - refocus a field to type")
+                toastIt(if (clipOn) "Held (${OutstandingStore.count(ctx)}) + copied to clipboard - refocus a field to type"
+                        else "Held (${OutstandingStore.count(ctx)}) - open Whisper keyboard to insert")
             }
             finish()
             return

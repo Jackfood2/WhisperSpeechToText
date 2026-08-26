@@ -21,14 +21,25 @@ class ProcessingService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var idleTicks = 0
 
+    /**
+     * Single source of truth for "model must stay": only REAL work blocks the countdown -
+     * an active recording or transcription actually in flight/queued.
+     *
+     * Waiting-to-type and outstanding ("paste/send") transcripts do NOT block it: they are
+     * already finished text cached in OutstandingStore/TextRouter - inserting them later
+     * just commits the stored string, whisper is never needed again for them.
+     */
+    private fun busyNow(): Boolean {
+        val recNow = runCatching { QuickSwitchService.recActive }.getOrDefault(false) ||
+                runCatching { WhisperKeyboardService.imeRecording }.getOrDefault(false)
+        return TranscriptionQueue.isActive() || recNow
+    }
+
     private val poller = object : Runnable {
         var lastShown = ""
         override fun run() {
             val held = OutstandingStore.count(WhisperApp.holder)
-            // recording on ANY interface counts as activity (strict timeout semantics)
-            val recNow = runCatching { QuickSwitchService.recActive }.getOrDefault(false) ||
-                    runCatching { WhisperKeyboardService.imeRecording }.getOrDefault(false)
-            val busy = TranscriptionQueue.isActive() || TextRouter.pendingTypingCount() > 0 || held > 0 || recNow
+            val busy = busyNow()
             val nm = getSystemService(NotificationManager::class.java)
             if (!busy) {
                 idleTicks++
@@ -43,7 +54,13 @@ class ProcessingService : Service() {
                 if (txt != lastShown) { lastShown = txt; nm?.notify(NOTIF_ID, buildNotif(txt)) }
 
                 if (ticksAllowed > 0 && idleTicks == ticksAllowed) {
-                    Thread { WhisperEngine.unloadIfIdle() }.start() // real native free + its own notification/toast
+                    // Final re-check inside the unload thread: if anything became active in the
+                    // last second (new recording, queued chunk, parked transcript), skip the
+                    // unload - the busy branch will reset the countdown on the next tick.
+                    Thread {
+                        if (!busyNow()) WhisperEngine.unloadIfIdle()
+                        else AppLog.i("Processing", "unload skipped - activity resumed")
+                    }.start()
                 }
                 val stopAt = if (ticksAllowed == 0) 20 else ticksAllowed + 8
                 if (idleTicks >= stopAt) {

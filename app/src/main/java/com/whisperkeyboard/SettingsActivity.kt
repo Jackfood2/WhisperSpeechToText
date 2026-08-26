@@ -78,6 +78,14 @@ class SettingsActivity : AppCompatActivity() {
         swImeChunked.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("ime_chunked", b).apply(); saved(); Toast.makeText(this, if (b) "Keyboard: chunked ON" else "Keyboard: whole audio on Stop", Toast.LENGTH_SHORT).show() }
         swBubbleChunked.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("bubble_chunked", b).apply(); saved(); Toast.makeText(this, if (b) "Bubble: chunked ON" else "Bubble: whole audio on Stop", Toast.LENGTH_SHORT).show() }
 
+        // Outstanding transcripts -> clipboard (off = retrieve only via keyboard insert button)
+        val swOutClip = findViewById<SwitchMaterial>(R.id.switchOutClip)
+        swOutClip.isChecked = prefs.getBoolean("out_clipboard", true)
+        swOutClip.setOnCheckedChangeListener { _, b ->
+            prefs.edit().putBoolean("out_clipboard", b).apply(); saved()
+            Toast.makeText(this, if (b) "Outstanding -> clipboard ON" else "Outstanding -> clipboard OFF (keyboard insert only)", Toast.LENGTH_SHORT).show()
+        }
+
         // ---- Threads (CPU cores) ----
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
         findViewById<TextView>(R.id.tvCores).text = "Transcription threads | $cores CPU cores detected"

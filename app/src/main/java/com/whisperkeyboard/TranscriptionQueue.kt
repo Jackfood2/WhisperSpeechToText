@@ -56,17 +56,13 @@ object TranscriptionQueue {
     private fun getAvgRatio(ctx: Context, model: String): Double {
         return try {
             val prefs = ctx.getSharedPreferences("whisper_stats", Context.MODE_PRIVATE)
+            // per-model EMA from the FIRST real sample onward - never fall back to the
+            // cross-model global for estimation (a base-model average would misestimate small)
             val perCount = prefs.getInt("count_$model", 0)
-            if (perCount >= 2) {
+            if (perCount >= 1) {
                 val r = prefs.getFloat("ratio_$model", defaultRatio(model).toFloat()).toDouble()
                 Log.i(TAG, "avgRatio $model = $r from $perCount samples (per-model)")
                 return r
-            }
-            val gCount = prefs.getInt("count_global", 0)
-            if (gCount >= 2) {
-                val gr = prefs.getFloat("ratio_global", 0.28f).toDouble()
-                Log.i(TAG, "avgRatio $model fallback global=$gr from $gCount samples")
-                return gr
             }
             defaultRatio(model)
         } catch (_: Exception) { defaultRatio(model) }
@@ -78,23 +74,26 @@ object TranscriptionQueue {
             val ratio = (transcribeSec / audioSec).coerceIn(0.02, 5.0)
             val prefs = ctx.getSharedPreferences("whisper_stats", Context.MODE_PRIVATE)
             val ed = prefs.edit()
-            // per-model exponential moving average via count-weighted
+            // per-model EXPONENTIAL moving average (alpha=0.2 -> ~last 5 runs dominate):
+            // adapts to current device speed (thermals/background load) while still averaging
+            // every past run. A plain cumulative mean goes stale after ~50 samples (<2% shift),
+            // which made the progress bar look like it had "no effect".
             val cnt = prefs.getInt("count_$model", 0)
             val old = prefs.getFloat("ratio_$model", ratio.toFloat()).toDouble()
-            val newAvg = if (cnt == 0) ratio else (old * cnt + ratio) / (cnt + 1)
+            val newAvg = if (cnt == 0) ratio else old * 0.8 + ratio * 0.2
             ed.putFloat("ratio_$model", newAvg.toFloat())
             ed.putInt("count_$model", cnt + 1)
-            // global
+            // global (display/debug only - NOT used for estimates)
             val gCnt = prefs.getInt("count_global", 0)
             val gOld = prefs.getFloat("ratio_global", ratio.toFloat()).toDouble()
-            val gNew = if (gCnt == 0) ratio else (gOld * gCnt + ratio) / (gCnt + 1)
+            val gNew = if (gCnt == 0) ratio else gOld * 0.9 + ratio * 0.1
             ed.putFloat("ratio_global", gNew.toFloat())
             ed.putInt("count_global", gCnt + 1)
             // also store last audio/time for debug
             ed.putFloat("last_audio_${model}", audioSec.toFloat())
             ed.putFloat("last_time_${model}", transcribeSec.toFloat())
             ed.apply()
-            Log.i(TAG, "recordStats model=$model audio=${String.format("%.1f", audioSec)}s time=${String.format("%.1f", transcribeSec)}s ratio=${String.format("%.3f", ratio)} -> avg $model=${String.format("%.3f", newAvg)} global=${String.format("%.3f", gNew)} cnt $cnt/$gCnt")
+            Log.i(TAG, "recordStats model=$model audio=${String.format("%.1f", audioSec)}s time=${String.format("%.1f", transcribeSec)}s ratio=${String.format("%.3f", ratio)} -> ema $model=${String.format("%.3f", newAvg)} global=${String.format("%.3f", gNew)} cnt $cnt/$gCnt")
         } catch (e: Exception) { Log.w(TAG, "recordStats failed: ${e.message}") }
     }
 
