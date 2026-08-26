@@ -22,6 +22,7 @@ class ProcessingService : Service() {
     private var idleTicks = 0
 
     private val poller = object : Runnable {
+        var lastShown = ""
         override fun run() {
             val held = OutstandingStore.count(WhisperApp.holder)
             // recording on ANY interface counts as activity (strict timeout semantics)
@@ -32,23 +33,27 @@ class ProcessingService : Service() {
             if (!busy) {
                 idleTicks++
                 // STRICT user setting: unload exactly after unload_idle_ticks*30s of inactivity.
-                // Works identically on lock screen (foreground service keeps ticking).
-                // ticksAllowed == 0 (Never) -> model stays in memory until process death.
                 val ticksAllowed = getSharedPreferences("whisper", MODE_PRIVATE).getInt("unload_idle_ticks", 2) * 30
-                if (ticksAllowed > 0 && idleTicks == ticksAllowed) {
-                    Thread { WhisperEngine.unloadIfIdle() }.start()
+
+                val txt = when {
+                    ticksAllowed == 0 -> "Idle - model kept in memory (Never = no unload)"
+                    idleTicks < ticksAllowed -> "Loaded - unloads in ${ticksAllowed - idleTicks}s"
+                    else -> "Model unloaded - memory freed"
                 }
-                if (ticksAllowed in 1..(idleTicks + 5) && idleTicks >= ticksAllowed + 5) {
+                if (txt != lastShown) { lastShown = txt; nm?.notify(NOTIF_ID, buildNotif(txt)) }
+
+                if (ticksAllowed > 0 && idleTicks == ticksAllowed) {
+                    Thread { WhisperEngine.unloadIfIdle() }.start() // real native free + its own notification/toast
+                }
+                val stopAt = if (ticksAllowed == 0) 20 else ticksAllowed + 8
+                if (idleTicks >= stopAt) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                     return
                 }
-                if (ticksAllowed == 0 && idleTicks >= 90) {
-                    stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); return
-                }
-                nm?.notify(NOTIF_ID, buildNotif(0, 0, 0))
             } else {
                 idleTicks = 0
+                lastShown = ""
                 val q = TranscriptionQueue.pendingCount()
                 val typing = TextRouter.pendingTypingCount()
                 nm?.notify(NOTIF_ID, buildNotif(q, typing, held))
@@ -66,6 +71,16 @@ class ProcessingService : Service() {
         startForeground(NOTIF_ID, buildNotif(0, 0, 0))
         handler.post(poller)
     }
+
+    private fun buildNotif(txt: String): Notification =
+        NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setContentTitle("Whisper - processing")
+            .setContentText(txt)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
 
     private fun buildNotif(queued: Int, typing: Int, held: Int): Notification {
         val parts = mutableListOf<String>()
