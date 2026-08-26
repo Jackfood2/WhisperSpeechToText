@@ -10,9 +10,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PixelFormat
-import android.media.AudioFormat
 import android.media.AudioRecord
-import android.media.MediaRecorder
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -58,6 +56,7 @@ class QuickSwitchService : Service() {
     @Volatile private var recActive = false
     private var recThread: Thread? = null
     @Volatile private var activeBubbleRecorder: AudioRecord? = null
+    @Volatile private var sessionHadVoice = false
     private var fnameCounter = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -208,6 +207,7 @@ class QuickSwitchService : Service() {
                 WhisperEngine.ensureModel(mf.absolutePath)
             }.apply { isDaemon = true; name = "bubble-model-load"; start() }
         }
+        sessionHadVoice = false
         recActive = true
         setState(STATE_REC, null)
         toast("Recording started - tap to stop")
@@ -234,10 +234,8 @@ class QuickSwitchService : Service() {
             try {
                 // make sure the previous session's recorder/thread is fully gone before capturing
                 try { prevThread?.join(800) } catch (_: Exception) {}
-                val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-                if (minBuf <= 0) throw IllegalStateException("Mic unavailable (buffer=$minBuf)")
-                val rec = AudioRecord(MediaRecorder.AudioSource.MIC, 16000, AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf * 4, 32000))
+                // BT-aware factory (same as keyboard): respects bt_mic pref incl. SCO + AGC
+                val rec = AudioUtils.createRecorder(this)
                 if (rec.state != AudioRecord.STATE_INITIALIZED) throw IllegalStateException("Mic init failed (state=${rec.state})")
                 activeBubbleRecorder = rec
 
@@ -273,10 +271,10 @@ class QuickSwitchService : Service() {
                     badReads = 0
                     val rms = AudioUtils.rms16(buf, n)
                     val now = System.currentTimeMillis()
-                    val voiced = rms > 0.012 // bubble uses slightly lower threshold for reliability
+                    val voiced = rms > 0.008 // bubble: lenient gate; transcription decides speech vs noise
                     // always buffer - preserves the very start of speech (prevents front cut)
                     synchronized(pcmChunk) { pcmChunk.write(buf, 0, n) }
-                    if (voiced) { gotVoice = true; lastVoiceTime = now }
+                    if (voiced) { gotVoice = true; sessionHadVoice = true; lastVoiceTime = now }
                     if (gotVoice) {
                         val silenceFor = now - lastVoiceTime
                         val durMs = now - chunkStartMs
