@@ -139,13 +139,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onTrimMemory(level: Int) {
-        super.onTrimMemory(level)
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-            Thread { WhisperEngine.unloadIfIdle() }.apply { isDaemon = true; start() }
-        }
-    }
-
     override fun onDestroy() {
         TranscriptionQueue.removeListener(pqListener)
         super.onDestroy()

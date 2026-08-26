@@ -24,13 +24,17 @@ class ProcessingService : Service() {
     private val poller = object : Runnable {
         override fun run() {
             val held = OutstandingStore.count(WhisperApp.holder)
-            val busy = TranscriptionQueue.isActive() || TextRouter.pendingTypingCount() > 0 || held > 0
+            // recording on ANY interface counts as activity (strict timeout semantics)
+            val recNow = runCatching { QuickSwitchService.recActive }.getOrDefault(false) ||
+                    runCatching { WhisperKeyboardService.imeRecording }.getOrDefault(false)
+            val busy = TranscriptionQueue.isActive() || TextRouter.pendingTypingCount() > 0 || held > 0 || recNow
             val nm = getSystemService(NotificationManager::class.java)
             if (!busy) {
                 idleTicks++
-                // battery protection: unload the cached whisper model after the user-configured
-                // idle window (unload_idle_ticks x 30s; 0 = keep in memory). Applies to bubble AND keyboard.
-                val ticksAllowed = getSharedPreferences("whisper", MODE_PRIVATE).getInt("unload_idle_ticks", 2) * 30 // seconds (ticks are ~1s)
+                // STRICT user setting: unload exactly after unload_idle_ticks*30s of inactivity.
+                // Works identically on lock screen (foreground service keeps ticking).
+                // ticksAllowed == 0 (Never) -> model stays in memory until process death.
+                val ticksAllowed = getSharedPreferences("whisper", MODE_PRIVATE).getInt("unload_idle_ticks", 2) * 30
                 if (ticksAllowed > 0 && idleTicks == ticksAllowed) {
                     Thread { WhisperEngine.unloadIfIdle() }.start()
                 }
@@ -39,7 +43,6 @@ class ProcessingService : Service() {
                     stopSelf()
                     return
                 }
-                // safety: even with unload disabled, don't poll forever when there is nothing to watch
                 if (ticksAllowed == 0 && idleTicks >= 90) {
                     stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); return
                 }

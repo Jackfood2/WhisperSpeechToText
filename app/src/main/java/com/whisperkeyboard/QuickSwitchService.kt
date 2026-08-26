@@ -35,7 +35,7 @@ import java.io.FileOutputStream
  */
 class QuickSwitchService : Service() {
 
-    private companion object {
+    companion object {
         const val CHANNEL = "quick_switch"
         const val NOTIF_ID = 42
         const val WHISPER_IME = "com.whisperkeyboard/.WhisperKeyboardService"
@@ -46,6 +46,9 @@ class QuickSwitchService : Service() {
         const val STATE_IDLE = 0
         const val STATE_REC = 1
         const val STATE_PROC = 2
+
+        /** Readable by ProcessingService for strict idle-timeout accounting. */
+        @Volatile var recActive = false
     }
 
     private var bubble: BubbleView? = null
@@ -53,7 +56,6 @@ class QuickSwitchService : Service() {
     private val handler = Handler(Looper.getMainLooper())
 
     @Volatile private var state = STATE_IDLE
-    @Volatile private var recActive = false
     private var recThread: Thread? = null
     @Volatile private var activeBubbleRecorder: AudioRecord? = null
     @Volatile private var sessionHadVoice = false

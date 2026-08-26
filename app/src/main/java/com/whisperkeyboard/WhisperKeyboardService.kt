@@ -111,19 +111,8 @@ class WhisperKeyboardService : InputMethodService() {
         }.apply { isDaemon = true; name = "model-preload-$from"; start() }
     }
 
-    private fun maybeUnload(reason: String) {
-        if (isRecording.get()) { Log.i(TAG, "Skip unload ($reason) - recording"); return }
-        if (TranscriptionQueue.isActive()) { Log.i(TAG, "Skip unload ($reason) - queue busy"); return }
-        WhisperEngine.unloadIfIdle()
-    }
-
-    override fun onTrimMemory(level: Int) {
-        super.onTrimMemory(level)
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-            AppLog.i(TAG, "memory pressure level=$level -> unload check")
-            Thread { maybeUnload("trimMemory$level") }.apply { isDaemon = true; start() }
-        }
-    }
+    // NOTE: model unloading follows STRICTLY the user's "Unload model when idle" timeout
+    // (ProcessingService enforces it, incl. lock screen). No other triggers.
 
     override fun onCreateInputView(): View {
         Log.i(TAG, "onCreateInputView")
@@ -545,7 +534,6 @@ class WhisperKeyboardService : InputMethodService() {
         try { activeRecorder?.stop() } catch (_: Exception) {}
         try { activeRecorder?.release() } catch (_: Exception) {}
         stopImeForeground()
-        maybeUnload("onDestroy")
         super.onDestroy()
     }
 }
