@@ -6,10 +6,14 @@ import android.content.Context
 import android.os.Bundle
 import android.os.Environment
 import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import java.io.File
+import java.io.PrintWriter
+import java.io.StringWriter
 
 class PrivacyDashboardActivity : AppCompatActivity() {
 
@@ -21,22 +25,53 @@ class PrivacyDashboardActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Capture ANY crash inside this screen: show it on-screen + copy to clipboard,
+        // instead of the app dying with "clear cache" prompts.
+        val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            runCatching { saveCrash(e) }
+            runCatching { showErrorScreen(e) }
+            prevHandler?.uncaughtException(t, e)
+        }
         try {
-            setContentView(R.layout.activity_privacy_dashboard)
             wireUi()
-        } catch (root: Throwable) {
-            // never crash - show the error on screen so it can be reported/copied
-            setContentView(android.R.id.content)
-            val tv = TextView(this)
-            tv.text = "Dashboard failed to render.\n\n${root.stackTraceToString().take(3000)}\n\nUse 'Copy Error/Log' after reopening."
-            tv.setTextIsSelectable(true)
-            tv.setPadding(24, 24, 24, 24)
-            setContentView(tv)
-            AppLog.e("Dashboard", "render failed: ${root.message}")
+        } catch (e: Throwable) {
+            saveCrash(e)
+            showErrorScreen(e)
         }
     }
 
+    private fun saveCrash(e: Throwable) {
+        val sw = StringWriter()
+        e.printStackTrace(PrintWriter(sw))
+        val trace = sw.toString().take(6000)
+        AppLog.e("Dashboard", "CRASH: ${e.message}\n${trace.take(500)}")
+        try {
+            val ctx = WhisperApp.holder ?: this
+            File(ctx.getExternalFilesDir(null), "dashboard_crash.txt").writeText(trace)
+        } catch (_: Exception) {}
+    }
+
+    /** Plain programmatic error screen - cannot fail. */
+    private fun showErrorScreen(e: Throwable) {
+        val sw = StringWriter()
+        e.printStackTrace(PrintWriter(sw))
+        val scroll = ScrollView(this)
+        val tv = TextView(this)
+        tv.text = "Dashboard crashed.\n\nStack trace (also copied to clipboard & saved to app files as dashboard_crash.txt):\n\n$sw"
+        tv.setTextIsSelectable(true)
+        tv.setPadding(32, 32, 32, 32)
+        scroll.addView(tv)
+        setContentView(scroll)
+        try {
+            val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cb.setPrimaryClip(ClipData.newPlainText("whisper_dashboard_crash", sw.toString()))
+            Toast.makeText(this, "Crash details copied to clipboard", Toast.LENGTH_LONG).show()
+        } catch (_: Exception) {}
+    }
+
     private fun wireUi() {
+        setContentView(R.layout.activity_privacy_dashboard)
         val tvStats = findViewById<TextView>(R.id.tvStats)
         val tvLogs = findViewById<TextView>(R.id.tvLogs)
 
@@ -48,7 +83,7 @@ class PrivacyDashboardActivity : AppCompatActivity() {
                 sb.appendLine("Models stored: getExternalFilesDir/models (cleared on uninstall)")
                 sb.appendLine("Transcripts: Documents/WhisperNotes/*.txt (you control)")
                 sb.appendLine()
-                sb.appendLine("Adaptive progress baseline (per-model avg ratio = transcribeSec / audioSec):")
+                sb.appendLine("Adaptive baseline (per-model avg ratio):")
                 for (m in listOf("tiny","base","small","medium")) {
                     val cnt = prefs.getInt("count_$m", 0)
                     val ratio = prefs.getFloat("ratio_$m", 0f)
@@ -66,12 +101,10 @@ class PrivacyDashboardActivity : AppCompatActivity() {
                 val docs = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes")
                 val txts = docs.listFiles()?.filter { it.extension=="txt" }?.size ?: 0
                 val failed = File(docs, "failed").listFiles()?.size ?: 0
-                sb.appendLine("Saved transcripts: $txts files in Documents/WhisperNotes")
-                sb.appendLine("Failed queue saves: $failed in .../failed/")
+                sb.appendLine("Saved transcripts: $txts | Failed saves: $failed")
                 sb.appendLine()
-                sb.appendLine("Toggles:")
                 val p2 = getSharedPreferences("whisper", MODE_PRIVATE)
-                sb.appendLine("  VAD: ${p2.getBoolean("vad_on", true)} | LIVE: ${p2.getBoolean("live_on", true)} | BT mic: ${p2.getBoolean("bt_mic", false)} | caps: ${p2.getString("caps_mode","auto")} | chunked kb: ${p2.getBoolean("ime_chunked", true)} | chunked bubble: ${p2.getBoolean("bubble_chunked", true)} | threads: ${p2.getString("threads_mode","auto")} | unload: ${p2.getInt("unload_idle_ticks",2)*30}s")
+                sb.appendLine("VAD: ${p2.getBoolean("vad_on", true)} | LIVE: ${p2.getBoolean("live_on", true)} | BT: ${p2.getBoolean("bt_mic", false)} | caps: ${p2.getString("caps_mode","auto")} | chunked kb: ${p2.getBoolean("ime_chunked", true)} | chunked bubble: ${p2.getBoolean("bubble_chunked", true)} | threads: ${p2.getString("threads_mode","auto")} | unload: ${p2.getInt("unload_idle_ticks",2)*30}s")
                 tvStats.text = sb.toString()
 
                 val logSb = StringBuilder()
@@ -80,9 +113,8 @@ class PrivacyDashboardActivity : AppCompatActivity() {
                     for (f in txtFiles) {
                         logSb.appendLine("== ${f.name} ==")
                         logSb.appendLine(f.readText().take(1200))
-                        logSb.appendLine()
                     }
-                    if (logSb.isEmpty()) logSb.append("No transcripts yet. Speak then Stop.")
+                    if (logSb.isEmpty()) logSb.append("No transcripts yet.")
                 } catch (e: Exception) { logSb.append("Log read error: ${e.message}") }
                 tvLogs.text = logSb.toString()
             } catch (e: Throwable) {
@@ -98,10 +130,9 @@ class PrivacyDashboardActivity : AppCompatActivity() {
             savedToast("Stats reset"); refresh()
         }
         findViewById<Button>(R.id.btnExportLogs).setOnClickListener {
-            val prefs = getSharedPreferences("whisper_stats", MODE_PRIVATE).all.entries.joinToString("\n") { "${it.key}=${it.value}" }
-            val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cb.setPrimaryClip(ClipData.newPlainText("whisper_stats", prefs))
-            savedToast("Stats copied to clipboard")
+            val dump = getSharedPreferences("whisper_stats", MODE_PRIVATE).all.entries.joinToString("\n") { "${it.key}=${it.value}" }
+            (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("whisper_stats", dump))
+            savedToast("Stats copied")
         }
         findViewById<Button>(R.id.btnClearTranscripts).setOnClickListener {
             val docs = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes")
@@ -111,7 +142,6 @@ class PrivacyDashboardActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.btnRefresh).setOnClickListener { refresh() }
 
-        // ---- functionality / error log section ----
         val tvDiag = findViewById<TextView>(R.id.tvDiagLog)
         fun refreshDiag() {
             try {
@@ -126,8 +156,7 @@ class PrivacyDashboardActivity : AppCompatActivity() {
         refreshDiag()
         findViewById<Button>(R.id.btnRefreshDiag).setOnClickListener { refreshDiag(); Toast.makeText(this, "Log refreshed", Toast.LENGTH_SHORT).show() }
         findViewById<Button>(R.id.btnCopyDiag).setOnClickListener {
-            val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cb.setPrimaryClip(ClipData.newPlainText("whisper_diag_log", AppLog.dump()))
+            (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("whisper_diag_log", AppLog.dump()))
             Toast.makeText(this, "Error/log copied to clipboard", Toast.LENGTH_LONG).show()
         }
         findViewById<Button>(R.id.btnClearDiag).setOnClickListener {

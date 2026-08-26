@@ -61,6 +61,21 @@ class QuickSwitchService : Service() {
     @Volatile private var sessionHadVoice = false
     private var fnameCounter = 0
 
+    /** Persistent recorder - created once, reused for every session. No cross-session mic races. */
+    @Volatile private var sharedRecorder: AudioRecord? = null
+
+    private fun obtainRecorder(): AudioRecord {
+        sharedRecorder?.let {
+            if (it.state == AudioRecord.STATE_INITIALIZED) return it
+            try { it.release() } catch (_: Exception) {}
+            sharedRecorder = null
+        }
+        val rec = AudioUtils.createRecorder(this)
+        if (rec.state != AudioRecord.STATE_INITIALIZED) throw IllegalStateException("Mic init failed (state=${rec.state})")
+        sharedRecorder = rec
+        return rec
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -221,44 +236,52 @@ class QuickSwitchService : Service() {
         val lang = prefs.getString("lang", "auto") ?: "auto"
         // per-session buffer: a fast stop/start must never share audio with the dying session
         val pcmChunk = ByteArrayOutputStream()
+        // threads hand off cleanly: new session waits for the old one to finish its final flush
         val prevThread = recThread
+        WhisperEngine.applyThreadPref(this) // ensure thread pref applied even when model stays hot
+        if (!WhisperEngine.isLoaded(ModelManager.modelFile(this, model).absolutePath)) {
+            Thread {
+                WhisperEngine.ensureModel(ModelManager.modelFile(this, model).absolutePath)
+            }.apply { isDaemon = true; name = "bubble-model-load"; start() }
+        }
         recThread = Thread {
             var lastVoiceTime = System.currentTimeMillis()
             var chunkStartMs = lastVoiceTime
+            val recStartMs = lastVoiceTime
             var gotVoice = false
             var chunksEnqueued = 0
-            val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
             val chunked = prefs.getBoolean("bubble_chunked", true)
             // unified timing with the keyboard interface (Settings page)
             val chunkSilenceMs = prefs.getInt("vad_chunk_silence_ds", 40).coerceIn(5, 100) * 100L
             val chunkTargetMs = prefs.getInt("chunk_target_s", 30).coerceIn(1, 45) * 1000L
-            val recStartMs = System.currentTimeMillis()
             try {
-                // make sure the previous session's recorder/thread is fully gone before capturing
-                try { prevThread?.join(800) } catch (_: Exception) {}
-                // BT-aware factory (same as keyboard): respects bt_mic pref incl. SCO + AGC
-                val rec = AudioUtils.createRecorder(this)
-                if (rec.state != AudioRecord.STATE_INITIALIZED) throw IllegalStateException("Mic init failed (state=${rec.state})")
+                prevThread?.join(1200) // old session flushes & exits first (deterministic handoff)
+                val rec = obtainRecorder()
                 activeBubbleRecorder = rec
 
-                // Some devices update recordingState asynchronously - retry instead of failing fast.
+                // restart capture for this session; retry a few times on slow devices
                 var started = false
-                var lastErr: Exception? = null
-                repeat(4) { attempt ->
+                repeat(4) {
                     if (started) return@repeat
-                    try {
-                        rec.startRecording()
-                        Thread.sleep(80)
-                        if (rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) started = true
-                        else AppLog.w("Bubble", "start attempt $attempt not recording (state=${rec.recordingState})")
-                    } catch (e: Exception) { lastErr = e; AppLog.w("Bubble", "start attempt ${e.message}") }
+                    try { rec.startRecording() } catch (_: Exception) {}
+                    Thread.sleep(60)
+                    started = rec.recordingState == AudioRecord.RECORDSTATE_RECORDING
                 }
-                if (!started) throw IllegalStateException("Mic did not start${lastErr?.let { ": ${it.message}" } ?: ""}")
-                AppLog.i("Bubble", "mic started ok")
+                if (!started) throw IllegalStateException("Mic did not start")
+
+                // drain stale audio left over from previous sessions (max ~1s worth)
+                val drain = ByteArray(4096)
+                var drained = 0
+                while (drained < 64000) {
+                    val n = rec.read(drain, 0, drain.size)
+                    if (n <= 0) break
+                    drained += n
+                }
 
                 val buf = ByteArray(4096)
-                var gotFirstAudio = false
                 var badReads = 0
+                AppLog.i("Bubble", "capture started (chunked=$chunked)")
+
                 while (recActive) {
                     val n = try { rec.read(buf, 0, buf.size) } catch (e: Exception) { AppLog.e("Bubble", "read threw: ${e.message}"); -1 }
                     if (n <= 0) {
@@ -269,7 +292,6 @@ class QuickSwitchService : Service() {
                         if (badReads >= 8) { AppLog.e("Bubble", "giving up after $badReads bad reads"); break }
                         continue
                     }
-                    if (!gotFirstAudio) { gotFirstAudio = true; AppLog.i("Bubble", "audio flowing ($n bytes/frame)") }
                     badReads = 0
                     val rms = AudioUtils.rms16(buf, n)
                     val now = System.currentTimeMillis()
@@ -300,15 +322,12 @@ class QuickSwitchService : Service() {
                     }
                 }
                 AppLog.i("Bubble", "loop exited (recActive=$recActive, chunks=$chunksEnqueued, gotVoice=$gotVoice)")
-                try { rec.stop(); rec.release() } catch (_: Exception) {}
-                activeBubbleRecorder = null
+                // stop capture but KEEP the recorder for reuse; final flush then hand off
+                try { rec.stop() } catch (_: Exception) {}
                 if (flushChunk(pcmChunk, model, lang)) chunksEnqueued++
                 finalFlushPending = false
-                if (chunksEnqueued == 0 && gotVoice) {
-                    // had voice but all chunks dropped as silent? try once more leniently
-                    AppLog.w("Bubble", "no chunks enqueued despite voice - forcing final")
-                } else if (chunksEnqueued == 0) {
-                    handler.post { toast("No speech detected") }
+                if (chunksEnqueued == 0) {
+                    handler.post { toast(if (gotVoice) "No speech detected" else "No speech captured") }
                 }
             } catch (e: Throwable) {
                 AppLog.e("Bubble", "rec error: ${e.message}")

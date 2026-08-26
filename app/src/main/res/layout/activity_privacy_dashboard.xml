@@ -12,11 +12,11 @@
             <TextView android:id="@+id/tvStats" android:text="" android:fontFamily="monospace" android:textSize="13sp" android:textColor="#212121" android:background="#F5F5F5" android:padding="10dp" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
             <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp">
                 <com.google.android.material.button.MaterialButton android:id="@+id/btnRefresh" android:text="Refresh" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp"/>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnResetStats" android:text="Reset Stats" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:layout_marginStart="8dp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnResetStats" android:text="Reset Stats" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:layout_marginStart="8dp"/>
             </LinearLayout>
             <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnExportLogs" android:text="Copy Stats" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp"/>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnClearTranscripts" android:text="Clear Transcripts" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:layout_marginStart="8dp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnExportLogs" android:text="Copy Stats" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnClearTranscripts" android:text="Clear Transcripts" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:layout_marginStart="8dp"/>
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
@@ -36,8 +36,8 @@
             </ScrollView>
             <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp">
                 <com.google.android.material.button.MaterialButton android:id="@+id/btnCopyDiag" android:text="Copy Error/Log" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp"/>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnClearDiag" android:text="Clear Log" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:layout_marginStart="8dp"/>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnRefreshDiag" android:text="Refresh" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:layout_marginStart="8dp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnClearDiag" android:text="Clear Log" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:layout_marginStart="8dp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnRefreshDiag" android:text="Refresh" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp" android:layout_marginStart="8dp"/>
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
