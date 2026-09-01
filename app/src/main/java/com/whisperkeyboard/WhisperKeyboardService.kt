@@ -53,6 +53,7 @@ class WhisperKeyboardService : InputMethodService() {
     private var btnMicCircle: androidx.appcompat.widget.AppCompatImageButton? = null
     private var btnCloseKeyboard: Button? = null
     private var btnBackspace: Button? = null
+    private var btnEnter: Button? = null
     private var btnKeyboardGear: Button? = null
     private var rowOutstanding: View? = null
     private var btnTypeOutstanding: Button? = null
@@ -62,6 +63,7 @@ class WhisperKeyboardService : InputMethodService() {
     private var btnStopAll: Button? = null
     private val handler = Handler(Looper.getMainLooper())
     private val backspaceHandler = Handler(Looper.getMainLooper())
+    private val enterHandler = Handler(Looper.getMainLooper())
     private var outstandingListener: (() -> Unit)? = null
 
     // Hold-to-delete WORDS, accelerating (400ms -> 80ms per word)
@@ -71,6 +73,13 @@ class WhisperKeyboardService : InputMethodService() {
             try { deleteLastWord() } catch (_: Exception) {}
             bsWordDelay = (bsWordDelay * 0.78f).coerceAtLeast(80f)
             backspaceHandler.postDelayed(this, bsWordDelay.toLong())
+        }
+    }
+
+    private val enterRepeater = object : Runnable {
+        override fun run() {
+            try { currentInputConnection?.commitText("\n", 1) } catch (_: Exception) {}
+            enterHandler.postDelayed(this, 140)
         }
     }
 
@@ -126,6 +135,7 @@ class WhisperKeyboardService : InputMethodService() {
         btnMicCircle = view.findViewById(R.id.btnMicCircle)
         btnCloseKeyboard = view.findViewById(R.id.btnCloseKeyboard)
         btnBackspace = view.findViewById(R.id.btnBackspace)
+        btnEnter = view.findViewById(R.id.btnEnter)
         tvLabels = view.findViewById(R.id.tvLabels)
         btnKeyboardGear = view.findViewById(R.id.btnKeyboardGear)
         rowOutstanding = view.findViewById(R.id.rowOutstanding)
@@ -163,6 +173,32 @@ class WhisperKeyboardService : InputMethodService() {
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                     backspaceHandler.removeCallbacks(backspaceWordRepeater)
+                    true
+                }
+                else -> false
+            }
+        }
+        // Enter: tap inserts newline; hold repeats
+        btnEnter?.setOnClickListener {
+            try {
+                val ic = currentInputConnection
+                // Prefer commitText; fallback to key event for single-line fields
+                if (ic != null) {
+                    val ok = ic.commitText("\n", 1)
+                    if (!ok) ic.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER))
+                }
+            } catch (_: Exception) {}
+        }
+        btnEnter?.setOnTouchListener { v, ev ->
+            when (ev.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    try { currentInputConnection?.commitText("\n", 1) } catch (_: Exception) {}
+                    enterHandler.postDelayed(enterRepeater, 380)
+                    v.performClick()
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    enterHandler.removeCallbacks(enterRepeater)
                     true
                 }
                 else -> false

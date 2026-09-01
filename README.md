@@ -28,6 +28,9 @@
 
 ## Changelog
 
+### v2.4.2 (2026-08-26) — Enter key on keyboard
+- New **↵ Enter** button stacked under **⌫ Backspace** on the right side of the keyboard. Tap inserts a new line in the focused field (hold repeats). Uses `commitText("\n")` with a key-event fallback so it works in both multi-line and single-line fields.
+
 ### v2.4.1 (2026-08-26) — Progress % that actually adapts + single model-status notification
 - **Adaptive progress fixed:** the estimate was a cumulative mean that went stale after ~50 recordings (each new run shifted it <2%) — so the bar seemed to have "no effect" on real speed. It's now an **exponential moving average** (last ~5 runs dominate), recalculated after **every** transcription and applied to the next estimate.
 - Per-model average is used from the **first sample**; the cross-model global no longer pollutes estimates (kept for dashboard display only).

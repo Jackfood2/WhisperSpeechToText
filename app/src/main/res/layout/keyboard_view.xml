@@ -35,9 +35,10 @@
                 android:contentDescription="Record"/>
         </FrameLayout>
 
-        <!-- Backspace only (tap = char, hold = words accelerating) -->
+        <!-- Backspace + Enter (tap = single-char/line, hold = repeat) -->
         <LinearLayout android:orientation="vertical" android:layout_width="wrap_content" android:layout_height="wrap_content">
             <Button android:id="@+id/btnBackspace" android:text="⌫" android:layout_width="62dp" android:layout_height="52dp" android:textSize="19sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#3A3A5C" android:contentDescription="Backspace: tap deletes a character, hold deletes words faster and faster"/>
+            <Button android:id="@+id/btnEnter" android:text="↵" android:layout_width="62dp" android:layout_height="42dp" android:layout_marginTop="4dp" android:textSize="18sp" android:textStyle="bold" android:textColor="#FFFFFF" android:backgroundTint="#3A3A5C" android:contentDescription="Enter: new line"/>
         </LinearLayout>
     </LinearLayout>
 
