@@ -34,6 +34,10 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
 
     private val models = arrayOf("tiny", "base", "small", "medium")
+    /** Position 0 = empty placeholder; engine switch always resets here. */
+    private val modelKeys = arrayOf("", "tiny", "base", "small", "medium")
+    private val modelNames = arrayOf("Select model…", "tiny", "base", "small", "medium")
+    private lateinit var modelAdapter: ArrayAdapter<String>
     private val engineKeys = arrayOf(SttEngines.WHISPER, SttEngines.MOONSHINE)
     private val engineNames = arrayOf("Whisper (multilingual)", "Moonshine v2 (English, fast)")
     private val langs = arrayOf("auto", "en", "zh", "ja", "ko", "fr", "de", "es")
@@ -41,6 +45,51 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun currentEngine(): String =
         getSharedPreferences("whisper", MODE_PRIVATE).getString("engine", SttEngines.WHISPER) ?: SttEngines.WHISPER
+
+    private fun selectedModelKey(): String =
+        modelKeys[spinnerModel.selectedItemPosition.coerceIn(modelKeys.indices)]
+
+    private fun isModelKeyReady(engine: String, key: String): Boolean {
+        if (key.isEmpty()) return false
+        return if (engine == SttEngines.MOONSHINE) {
+            ModelManager.isMoonshineReady(this, key) || MoonshineEngine.isLoaded(key)
+        } else {
+            ModelManager.isComplete(this, key)
+        }
+    }
+
+    /** Dropdown rows: downloaded = black, missing = grey, placeholder = grey. */
+    private fun paintModelRow(v: android.view.View, pos: Int) {
+        try {
+            val tv = v as? TextView ?: return
+            val ready = pos > 0 && isModelKeyReady(currentEngine(), modelKeys[pos])
+            tv.setTextColor(if (ready) 0xFF212121.toInt() else 0xFF9E9E9E.toInt())
+        } catch (_: Exception) {}
+    }
+
+    /** Ask to download a missing model; "No" reverts the picker to empty. */
+    private fun promptDownloadOrRevert(engine: String, key: String) {
+        val size = if (engine == SttEngines.MOONSHINE) ModelManager.moonshineSize(key)
+            else ModelManager.whisperSize(key)
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Download model?")
+            .setMessage("$engine/$key is not downloaded ($size). Download now over WiFi?")
+            .setPositiveButton("Download") { _, _ ->
+                prefsOf().edit().putString("model", key).apply()
+                refreshModelInfo()
+                downloadModel(key)
+            }
+            .setNegativeButton("Not now") { _, _ ->
+                spinnerModel.setSelection(0) // revert to empty
+                prefsOf().edit().putString("model", "").apply()
+                refreshModelInfo()
+                tvStatus.text = "No model selected"
+            }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun prefsOf() = getSharedPreferences("whisper", MODE_PRIVATE)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,7 +105,20 @@ class SettingsActivity : AppCompatActivity() {
         val engineAdapter = ArrayAdapter(this, R.layout.spinner_item, engineNames)
         engineAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
         spinnerEngine.adapter = engineAdapter
-        val modelAdapter = ArrayAdapter(this, R.layout.spinner_item, models)
+        // Model dropdown: black = downloaded, grey = not yet. Refreshed on engine
+        // switch and after every download.
+        modelAdapter = object : ArrayAdapter<String>(this, R.layout.spinner_item, modelNames) {
+            override fun getView(pos: Int, convert: android.view.View?, parent: android.view.ViewGroup): android.view.View {
+                val v = super.getView(pos, convert, parent)
+                paintModelRow(v, pos)
+                return v
+            }
+            override fun getDropDownView(pos: Int, convert: android.view.View?, parent: android.view.ViewGroup): android.view.View {
+                val v = super.getDropDownView(pos, convert, parent)
+                paintModelRow(v, pos)
+                return v
+            }
+        }
         modelAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
         spinnerModel.adapter = modelAdapter
         val langAdapter = ArrayAdapter(this, R.layout.spinner_item, langNames)
@@ -65,7 +127,7 @@ class SettingsActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
         spinnerEngine.setSelection(engineKeys.indexOf(prefs.getString("engine", SttEngines.WHISPER)).coerceAtLeast(0))
-        spinnerModel.setSelection(models.indexOf(prefs.getString("model", "small")).coerceAtLeast(0))
+        spinnerModel.setSelection(modelKeys.indexOf(prefs.getString("model", "small")).coerceAtLeast(0))
         spinnerLang.setSelection(langs.indexOf(prefs.getString("lang", "auto")).coerceAtLeast(0))
         applyEngineLock()
 
@@ -190,16 +252,16 @@ class SettingsActivity : AppCompatActivity() {
                 val e = engineKeys[pos.coerceIn(engineKeys.indices)]
                 prefs.edit().putString("engine", e).apply()
                 applyEngineLock()
+                modelAdapter.notifyDataSetChanged()
                 refreshModelInfo()
                 if (e != prev) {
-                    val m = models[spinnerModel.selectedItemPosition.coerceAtLeast(0)]
-                    tvStatus.text = "Loading $e/$m model..."
-                    Toast.makeText(this@SettingsActivity, "Engine: $prev -> $e (keyboard badge updates)", Toast.LENGTH_SHORT).show()
-                    Thread {
-                        SttEngines.unloadIdle()
-                        val ok = SttEngines.ensureModel(this@SettingsActivity, e, m, SttEngines.jobLang(this@SettingsActivity))
-                        runOnUiThread { tvStatus.text = if (ok) localStatusText(e, m) else "$e/$m load failed - see Dashboard log" }
-                    }.start()
+                    // Engine switch resets the model picker to empty (sizes differ per
+                    // engine); the user picks explicitly, with download state in color.
+                    prefs.edit().putString("model", "").apply()
+                    spinnerModel.setSelection(0)
+                    tvStatus.text = "Engine: $e - pick a model below"
+                    Toast.makeText(this@SettingsActivity, "Engine: $prev -> $e - model reset, pick one", Toast.LENGTH_SHORT).show()
+                    Thread { SttEngines.unloadIdle() }.start()
                 }
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
@@ -207,21 +269,32 @@ class SettingsActivity : AppCompatActivity() {
 
         spinnerModel.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) {
-                val prev = prefs.getString("model", "small")
-                val m = models[pos]
+                val p = pos.coerceIn(modelKeys.indices)
                 val e = currentEngine()
+                if (p == 0) {
+                    // Empty placeholder: nothing selected, recording stays blocked.
+                    prefs.edit().putString("model", "").apply()
+                    refreshModelInfo()
+                    tvStatus.text = "No model selected"
+                    return
+                }
+                val m = modelKeys[p]
+                val prev = prefs.getString("model", "") ?: ""
+                if (!isModelKeyReady(e, m)) {
+                    // Not downloaded: ask; "No" reverts to empty.
+                    promptDownloadOrRevert(e, m)
+                    return
+                }
                 prefs.edit().putString("model", m).apply()
                 refreshModelInfo()
                 if (m != prev) {
                     tvStatus.text = "Loading $e/$m model..."
-                    Toast.makeText(this@SettingsActivity, "Switching model: $prev -> $m", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@SettingsActivity, "Switching model: ${prev.ifEmpty { "(none)" }} -> $m", Toast.LENGTH_SHORT).show()
                     Thread {
-                        if (SttEngines.isReady(this@SettingsActivity, e, m)) {
-                            val ok = SttEngines.ensureModel(this@SettingsActivity, e, m, SttEngines.jobLang(this@SettingsActivity))
-                            runOnUiThread { tvStatus.text = if (ok) localStatusText(e, m) else "$e/$m load failed - see Dashboard log" }
-                        } else {
-                            SttEngines.unloadIdle()
-                            runOnUiThread { tvStatus.text = localStatusText(e, m) }
+                        val ok = SttEngines.ensureModel(this@SettingsActivity, e, m, SttEngines.jobLang(this@SettingsActivity))
+                        runOnUiThread {
+                            tvStatus.text = if (ok) localStatusText(e, m) else "$e/$m load failed - see Dashboard log"
+                            modelAdapter.notifyDataSetChanged()
                         }
                     }.start()
                 }
@@ -306,12 +379,21 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnSettingsDone).setOnClickListener { finish() }
 
         findViewById<Button>(R.id.btnDownloadModel).setOnClickListener {
-            downloadModel(models[spinnerModel.selectedItemPosition])
+            val key = selectedModelKey()
+            if (key.isEmpty()) {
+                Toast.makeText(this, "Select a model first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            downloadModel(key)
         }
 
         findViewById<Button>(R.id.btnTestModel).setOnClickListener {
             val e = currentEngine()
-            val m = models[spinnerModel.selectedItemPosition.coerceAtLeast(0)]
+            val m = selectedModelKey()
+            if (m.isEmpty()) {
+                Toast.makeText(this, "Select a model first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             if (!SttEngines.isReady(this, e, m)) {
                 tvStatus.text = "TEST $e/$m: not downloaded"
                 AppLog.e("ModelTest", "$e/$m not downloaded")
@@ -375,6 +457,7 @@ class SettingsActivity : AppCompatActivity() {
             getSharedPreferences("whisper", MODE_PRIVATE).edit().putString("lang", "en").apply()
             spinnerLang.setSelection(langs.indexOf("en").coerceAtLeast(0))
         }
+        if (::modelAdapter.isInitialized) modelAdapter.notifyDataSetChanged()
     }
 
     private fun localStatusText(engine: String, model: String): String =
@@ -383,16 +466,19 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun refreshModelInfo() {
         val e = currentEngine()
+        val selPos = spinnerModel.selectedItemPosition
         val sb = StringBuilder()
         sb.appendLine(if (e == SttEngines.MOONSHINE) "Engine: Moonshine v2 (English only)" else "Engine: Whisper (multilingual)")
-        for (m in models) {
-            val marker = if (m == spinnerModel.selectedItem.toString()) " > " else "   "
+        for (i in models.indices) {
+            val m = models[i]
+            val marker = if (i + 1 == selPos) " > " else "   "
             val state = if (e == SttEngines.MOONSHINE) {
                 if (ModelManager.isMoonshineReady(this, m) || MoonshineEngine.isLoaded(m)) "$marker$m: ${ModelManager.moonshineSize(m)} [downloaded]"
                 else "$marker$m: not downloaded (${ModelManager.moonshineSize(m)})"
             } else {
                 val f = ModelManager.modelFile(this, m)
-                if (f.exists() && f.length() > 1_000_000) "$marker$m: ${f.length() / 1024 / 1024} MB [downloaded]"
+                if (ModelManager.isComplete(this, m)) "$marker$m: ${f.length() / 1024 / 1024} MB [downloaded]"
+                else if (f.exists()) "$marker$m: INCOMPLETE (${f.length() / 1024 / 1024}/${ModelManager.expectedBytes(m) / 1024 / 1024} MB) - re-download"
                 else "$marker$m: not downloaded (${ModelManager.whisperSize(m)})"
             }
             sb.appendLine(state)
@@ -419,6 +505,7 @@ class SettingsActivity : AppCompatActivity() {
                 }
                 tvStatus.text = if (e == SttEngines.MOONSHINE) "Ready: moonshine-$model" else "Ready: ggml-$model.bin"
                 Toast.makeText(this@SettingsActivity, "Model $e/$model ready", Toast.LENGTH_LONG).show()
+                modelAdapter.notifyDataSetChanged()
                 refreshModelInfo()
             } catch (ex: Exception) {
                 tvStatus.text = "Failed: ${ex.message}"

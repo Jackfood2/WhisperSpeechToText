@@ -35,15 +35,24 @@ object SttEngines {
     fun badgeText(ctx: Context?): String {
         val e = current(ctx)
         val m = model(ctx)
-        return "${e.uppercase()} · $m"
+        return "${e.uppercase()} · ${m.ifEmpty { "—" }}"
+    }
+
+    /** Short user-facing reason why recording is blocked, or null when ready. */
+    fun describeMissing(ctx: Context, engine: String, model: String): String? {
+        if (model.isEmpty()) return "no model selected - pick one in Settings"
+        if (isReady(ctx, engine, model)) return null
+        if (engine == MOONSHINE) return "$model not downloaded - tap Download in Settings"
+        val short = ModelManager.shortfall(ctx, model)
+        return if (short != null) "$model incomplete ($short) - re-download in Settings"
+        else "$model not downloaded - tap Download in Settings"
     }
 
     fun isReady(ctx: Context, engine: String, model: String): Boolean {
         return if (engine == MOONSHINE) {
             ModelManager.isMoonshineReady(ctx, model) || MoonshineEngine.isLoaded(model)
         } else {
-            val f = ModelManager.modelFile(ctx, model)
-            f.exists() && f.length() > 1_000_000
+            ModelManager.isComplete(ctx, model)
         }
     }
 
@@ -60,8 +69,8 @@ object SttEngines {
             MoonshineEngine.applyThreadPref(ctx)
             MoonshineEngine.ensureModel(ctx, model, "en")
         } else {
+            if (!ModelManager.isComplete(ctx, model)) return false
             val mf = ModelManager.modelFile(ctx, model)
-            if (!mf.exists() || mf.length() < 1_000_000) return false
             if (WhisperEngine.isLoaded(mf.absolutePath)) return true
             WhisperEngine.applyThreadPref(ctx)
             WhisperEngine.ensureModel(mf.absolutePath)

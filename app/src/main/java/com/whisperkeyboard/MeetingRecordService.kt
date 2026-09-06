@@ -117,6 +117,15 @@ class MeetingRecordService : Service() {
 
     private fun startMeeting() {
         if (isRecording) return
+        // Defense in depth (MainActivity already preflights): refuse to record
+        // what the engine cannot transcribe instead of failing every chunk.
+        val missing = SttEngines.describeMissing(this, engine, model)
+        if (missing != null) {
+            Log.w(TAG, "refusing to record: $engine: $missing")
+            uiStatus = "$engine: $missing"
+            runCatching { stopSelf() }
+            return
+        }
         isRecording = true
         isRunning = true
         isStopping = false
@@ -264,6 +273,9 @@ class MeetingRecordService : Service() {
                     },
                     onError = { error ->
                         Log.e(TAG, "Chunk failed: $error")
+                        // User-visible: the old code only logged, leaving "1 failed" a mystery.
+                        val n = TranscriptionQueue.failedCount()
+                        uiStatus = "Chunk failed ($n failed): $error"
                     }
                 )
             )
@@ -338,7 +350,9 @@ class MeetingRecordService : Service() {
         val parts = mutableListOf<String>()
         transcriptFile?.name?.let { parts.add(it) }
         savedAudioFile?.name?.let { parts.add(it) }
-        uiStatus = if (parts.isEmpty()) "Saved ✓ (nothing recorded)" else "Saved ✓ ${parts.joinToString(" + ")}"
+        val failed = TranscriptionQueue.failedCount()
+        uiStatus = if (parts.isEmpty() && failed == 0) "Saved ✓ (nothing recorded)"
+        else "Saved ✓ ${parts.joinToString(" + ")}" + (if (failed > 0) " ($failed chunk(s) failed - see Retry Failed)" else "")
         runCatching { getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID) }
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
         runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }

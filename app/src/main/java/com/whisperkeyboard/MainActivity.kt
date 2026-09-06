@@ -5,12 +5,15 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -18,6 +21,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -38,6 +42,63 @@ class MainActivity : AppCompatActivity() {
         val stopping = MeetingRecordService.isStopping
         btnStartMeeting.isEnabled = !running && !stopping
         btnStopMeeting.isEnabled = running && !stopping
+    }
+
+    private fun notesDir(): File {
+        val d = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes")
+        if (!d.exists()) d.mkdirs()
+        return d
+    }
+
+    /** Open the recordings folder in the phone's file manager (SAF view with OEM fallbacks). */
+    private fun openRecordingsFolder() {
+        val dir = notesDir()
+        val saf = runCatching {
+            val uri = DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Documents/WhisperNotes")
+            startActivity(Intent(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            true
+        }.getOrDefault(false)
+        if (saf) return
+        for (pkg in listOf("com.sec.android.app.myfiles", "com.google.android.documentsui")) {
+            val ok = runCatching {
+                startActivity(packageManager.getLaunchIntentForPackage(pkg)!!); true
+            }.getOrDefault(false)
+            if (ok) {
+                Toast.makeText(this, "Open Documents/WhisperNotes", Toast.LENGTH_SHORT).show()
+                return
+            }
+        }
+        Toast.makeText(this, "Recordings at: ${dir.absolutePath}", Toast.LENGTH_LONG).show()
+    }
+
+    /** Delete ALL transcripts + audio (never models) behind an explicit confirmation. */
+    private fun confirmClearRecordings() {
+        if (MeetingRecordService.isRunning || MeetingRecordService.isStopping) {
+            Toast.makeText(this, "Stop the meeting first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val dir = notesDir()
+        val recs = dir.listFiles()?.filter { it.isFile && it.extension.lowercase() in listOf("txt", "m4a", "wav") } ?: emptyList()
+        val failed = File(dir, "failed").listFiles()?.filter { it.isFile } ?: emptyList()
+        val total = recs.size + failed.size
+        if (total == 0) {
+            Toast.makeText(this, "No recordings to clear", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Delete ALL recordings?")
+            .setMessage("Permanently delete $total file(s) - transcripts + audio in WhisperNotes? Downloaded models are NOT touched.")
+            .setPositiveButton("Delete ALL") { _, _ ->
+                var n = 0
+                for (f in recs + failed) { try { if (f.delete()) n++ } catch (_: Exception) {} }
+                getSharedPreferences("whisper", MODE_PRIVATE).edit()
+                    .remove("last_transcript_path").remove("last_audio_path").apply()
+                tvMeetingPath.text = ""
+                Toast.makeText(this, "Deleted $n file(s)", Toast.LENGTH_SHORT).show()
+                AppLog.i("Main", "cleared $n recording files")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private val permRequestCode = 100
@@ -89,13 +150,24 @@ class MainActivity : AppCompatActivity() {
             }
             if (!hasPermissions()) { requestPermissions(); return@setOnClickListener }
             val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
-            val lang = SttEngines.jobLang(this)
+            val engine = SttEngines.current(this)
             val model = prefs.getString("model", "small") ?: "small"
+            // Preflight: never record a meeting the engine cannot transcribe.
+            // Written to the SERVICE status (not the TextView) because the poll loop
+            // redisplays uiStatus every 800ms and would clobber a local message.
+            val missing = SttEngines.describeMissing(this, engine, model)
+            if (missing != null) {
+                Toast.makeText(this, "$engine: $missing", Toast.LENGTH_LONG).show()
+                MeetingRecordService.uiStatus = "$engine: $missing"
+                refreshMeetingButtons()
+                return@setOnClickListener
+            }
+            val lang = SttEngines.jobLang(this)
             val intent = Intent(this, MeetingRecordService::class.java)
             intent.action = "START"
             intent.putExtra("model", model)
             intent.putExtra("lang", lang)
-            intent.putExtra("engine", SttEngines.current(this))
+            intent.putExtra("engine", engine)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
             tvMeetingStatus.text = "Recording... tap Stop (continues with screen off)"
             Toast.makeText(this, "Meeting recording started", Toast.LENGTH_SHORT).show()
@@ -115,6 +187,9 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Stopping - transcript will be saved to Documents/WhisperNotes", Toast.LENGTH_LONG).show()
             refreshMeetingButtons()
         }
+
+        findViewById<Button>(R.id.btnOpenFolder).setOnClickListener { openRecordingsFolder() }
+        findViewById<Button>(R.id.btnClearRecords).setOnClickListener { confirmClearRecordings() }
 
         findViewById<Button>(R.id.btnDonate).setOnClickListener {
             try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://www.paypal.com/paypalme/jackfood2004"))) } catch (_: Exception) { Toast.makeText(this, "PayPal: jackfood2004@gmail.com", Toast.LENGTH_LONG).show() }

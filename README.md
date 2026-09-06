@@ -28,6 +28,18 @@
 
 ## Changelog
 
+### v2.7.8 (2026-09-06) — Reliability audit pass
+- Full review of the new picker/preflight/retry/clear paths for races: no toast-spam when no model is picked, spinner listeners verified fire-free on launch, retry re-resolves the current engine without losing jobs.
+
+### v2.7.7 (2026-09-06) — Recordings folder, clear-all, honest model picker
+- **Open Folder / Clear All** buttons on the app page: jump straight to `Documents/WhisperNotes` in the file manager; clearing asks for explicit Delete-ALL confirmation and never touches models.
+- **Model picker honesty:** engine switch resets the model to empty; rows are black when downloaded, grey when not; picking a missing model asks to download (No reverts to empty). Truncated-download detection from v2.7.6 included below.
+
+### v2.7.6 (2026-09-06) — Truncated model downloads detected + record preflight
+- **Root cause of "Queue: 1 failed":** the phone's `ggml-small.bin` was a truncated 426/465MB download, and the old >1MB check blessed it as complete forever. Models are now verified against official sizes (tiny 74MB / base 141MB / small 465MB / medium 1.43GB); partial files are reported as INCOMPLETE and deleted on re-download.
+- **Record preflight:** meeting/keyboard/bubble refuse to record when the selected engine+model isn't usable, naming the exact problem instead of failing every chunk.
+- **Failure messages:** chunk errors now reach the status line; the final status counts failed chunks; Retry Failed re-resolves the *current* engine instead of repeating a doomed one.
+
 ### v2.7.5 (2026-09-06) — Fixed roles: meeting saves TXT, keyboard types
 - Removed the dead "Type into focus" meeting option (it silently discarded transcripts). Meeting always saves TXT + audio; the keyboard always types into the focused field. No mode to pick anywhere.
 

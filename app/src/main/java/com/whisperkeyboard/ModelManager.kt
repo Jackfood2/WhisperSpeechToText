@@ -28,21 +28,57 @@ object ModelManager {
         return File(modelsDir(ctx), "ggml-$model.bin")
     }
 
+    /** Official ggml sizes (bytes, HuggingFace ggerganov/whisper.cpp). */
+    fun expectedBytes(model: String): Long = when (model) {
+        "tiny" -> 77_691_713L      // ~74 MB
+        "base" -> 147_951_465L     // ~141 MB
+        "small" -> 487_601_967L    // ~465 MB
+        "medium" -> 1_533_763_059L // ~1.43 GB
+        else -> 0L
+    }
+
+    /**
+     * A download counts as complete only if it reached ~its official size.
+     * The old >1MB check blessed truncated files (e.g. a 426/465MB small),
+     * which then failed at native load with a cryptic "1 failed".
+     */
+    fun isComplete(ctx: Context, model: String): Boolean {
+        return try {
+            val f = modelFile(ctx, model)
+            if (!f.exists()) return false
+            val exp = expectedBytes(model)
+            if (exp <= 0) return f.length() > 1_000_000
+            f.length() >= (exp * 0.98).toLong()
+        } catch (_: Exception) { false }
+    }
+
+    /** Human shortfall description, or null when complete/missing. */
+    fun shortfall(ctx: Context, model: String): String? {
+        return try {
+            val f = modelFile(ctx, model)
+            if (!f.exists()) return null
+            if (isComplete(ctx, model)) return null
+            "${f.length() / 1024 / 1024}/${expectedBytes(model) / 1024 / 1024} MB"
+        } catch (_: Exception) { null }
+    }
+
     fun localStatus(ctx: Context, model: String): String {
         val f = modelFile(ctx, model)
-        return if (f.exists() && f.length() > 1_000_000) {
-            "Ready: ggml-$model.bin (${f.length() / 1024 / 1024} MB)"
-        } else {
-            "Not downloaded - tap Download (WiFi recommended)"
+        return when {
+            isComplete(ctx, model) -> "Ready: ggml-$model.bin (${f.length() / 1024 / 1024} MB)"
+            f.exists() -> "INCOMPLETE ${shortfall(ctx, model)} - tap Download to re-download (WiFi)"
+            else -> "Not downloaded - tap Download (WiFi recommended)"
         }
     }
 
     fun download(ctx: Context, model: String, onProgress: (Int, String) -> Unit) {
         val outFile = modelFile(ctx, model)
-        if (outFile.exists() && outFile.length() > 1_000_000) {
+        if (isComplete(ctx, model)) {
             onProgress(100, "Already downloaded: ggml-${model}.bin")
             return
         }
+        // Drop any truncated previous attempt so it can never pass as complete.
+        try { if (outFile.exists()) outFile.delete() } catch (_: Exception) {}
 
         val url = URL(urlFor(model))
         val conn = url.openConnection() as HttpURLConnection
@@ -84,8 +120,14 @@ object ModelManager {
             conn.disconnect()
         }
 
-            // Verify file was written
-        if (!outFile.exists() || outFile.length() < 1_000_000) {
+            // Verify file reached its official size (a stall/truncate must NOT pass)
+        val exp = expectedBytes(model)
+        if (!outFile.exists() || (exp > 0 && outFile.length() < (exp * 0.98).toLong())) {
+            val got = if (outFile.exists()) "${outFile.length() / 1024 / 1024} MB" else "nothing"
+            outFile.delete()
+            throw RuntimeException("Download incomplete (got $got, expected ${exp / 1024 / 1024} MB) - retry on stable WiFi")
+        }
+        if (exp <= 0 && (!outFile.exists() || outFile.length() < 1_000_000)) {
             outFile.delete()
             throw RuntimeException("Download failed or file incomplete")
         }
@@ -93,9 +135,9 @@ object ModelManager {
 
     // ---------- Moonshine v2 (.ort bundles, auto-downloaded by moonshine-voice) ----------
 
-    /** Human-readable sizes for Settings UI. */
+    /** Human-readable sizes for Settings UI (official ggml sizes). */
     fun whisperSize(model: String): String = when (model) {
-        "tiny" -> "~75 MB"; "base" -> "~142 MB"; "small" -> "~244 MB"; "medium" -> "~769 MB"; else -> ""
+        "tiny" -> "~74 MB"; "base" -> "~141 MB"; "small" -> "~465 MB"; "medium" -> "~1.43 GB"; else -> ""
     }
 
     fun moonshineSize(model: String): String = when (model) {

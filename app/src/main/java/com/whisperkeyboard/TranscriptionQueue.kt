@@ -238,7 +238,21 @@ object TranscriptionQueue {
         synchronized(failedJobs) { toRetry = failedJobs.toList(); failedJobs.clear() }
         if (toRetry.isEmpty()) return
         Log.i(TAG, "Retrying ${toRetry.size} failed jobs")
-        for (j in toRetry) { if (j.wavFile.exists()) enqueue(j) else Log.w(TAG, "Failed file missing: ${j.wavFile}") }
+        for (j in toRetry) {
+            if (!j.wavFile.exists()) {
+                Log.w(TAG, "Failed file missing: ${j.wavFile}")
+                continue
+            }
+            // Re-resolve engine+lang to CURRENT prefs: a stale engine (e.g. failed on
+            // whisper, user since switched to moonshine) must not fail the retry again.
+            val ctx = j.context
+            val prefs = ctx.getSharedPreferences("whisper", Context.MODE_PRIVATE)
+            val engine = prefs.getString("engine", SttEngines.WHISPER) ?: SttEngines.WHISPER
+            val lang = if (engine == SttEngines.MOONSHINE) "en"
+                else (prefs.getString("lang", "auto") ?: "auto")
+            val model = prefs.getString("model", j.model) ?: j.model
+            enqueue(j.copy(engine = engine, lang = lang, model = model))
+        }
     }
 
     fun failedCount(): Int = synchronized(failedJobs) { failedJobs.size }
@@ -286,8 +300,13 @@ object TranscriptionQueue {
                                         if (!ok) throw IllegalStateException("Moonshine model ${job.model} not ready. Download it in app first. ${MoonshineEngine.lastError}")
                                     }
                                 } else {
-                                    val modelFile = ModelManager.modelFile(job.context, job.model)
-                                    if (!modelFile.exists() || modelFile.length() < 1_000_000) throw IllegalStateException("Model ggml-${job.model}.bin not found. Download it in app first.")
+                                    if (!ModelManager.isComplete(job.context, job.model)) {
+                                        val short = ModelManager.shortfall(job.context, job.model)
+                                        throw IllegalStateException(
+                                            if (short != null) "Model ggml-${job.model}.bin incomplete ($short) - re-download it in app first."
+                                            else "Model ggml-${job.model}.bin not found. Download it in app first."
+                                        )
+                                    }
                                 }
                                 resultText = SttEngines.transcribe(job.context, job.engine, job.model, job.wavFile, job.lang)
                                 if (resultText.startsWith("ERROR: cancelled")) {

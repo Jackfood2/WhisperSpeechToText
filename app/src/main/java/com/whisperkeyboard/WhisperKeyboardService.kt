@@ -108,8 +108,9 @@ class WhisperKeyboardService : InputMethodService() {
                 val eng = SttEngines.current(this)
                 val m = getModel()
                 if (!SttEngines.isReady(this, eng, m)) {
-                    handler.post { updateStatus("$eng/$m model not downloaded - open app to download") }
-                    AppLog.w(TAG, "preload($from): $eng/$m not downloaded")
+                    val missing = SttEngines.describeMissing(this, eng, m) ?: "not downloaded"
+                    handler.post { updateStatus("$missing - open app") }
+                    AppLog.w(TAG, "preload($from): $eng: $missing")
                     return@Thread
                 }
                 if (!SttEngines.isLoaded(this, eng, m)) {
@@ -366,8 +367,11 @@ class WhisperKeyboardService : InputMethodService() {
         val selModel = getModel()
         val selEngine = SttEngines.current(this)
         if (!SttEngines.isReady(this, selEngine, selModel)) {
-            updateStatus("$selEngine/$selModel not downloaded - open app, tap Download Model")
-            Toast.makeText(this, "$selEngine/$selModel model missing - open the app to download it", Toast.LENGTH_LONG).show()
+            val missing = SttEngines.describeMissing(this, selEngine, selModel) ?: "not downloaded"
+            updateStatus("$missing - open app")
+            // No toast when nothing is picked at all (status line suffices, and this
+            // fires on every keyboard show until the user picks a model in Settings).
+            if (selModel.isNotEmpty()) Toast.makeText(this, "$missing - open the app to fix it", Toast.LENGTH_LONG).show()
             return
         }
         // model ready but not in memory -> start recording NOW, load concurrently

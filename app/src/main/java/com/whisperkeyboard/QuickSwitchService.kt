@@ -258,7 +258,7 @@ class QuickSwitchService : Service() {
         val model = prefs.getString("model", "small") ?: "small"
         val engine = prefs.getString("engine", SttEngines.WHISPER) ?: SttEngines.WHISPER
         if (!SttEngines.isReady(this, engine, model)) {
-            toast("$engine/$model model not downloaded - open the app")
+            toast((SttEngines.describeMissing(this, engine, model) ?: "not downloaded") + " - open the app")
             return
         }
         ensureWhisperActive() // best effort so delivery can type directly

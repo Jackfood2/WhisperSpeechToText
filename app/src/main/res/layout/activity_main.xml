@@ -38,6 +38,10 @@
                 </LinearLayout>
                 <TextView android:id="@+id/tvMeetingStatus" android:text="Idle" android:textSize="13sp" android:textColor="#212121" android:textStyle="bold" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
                 <TextView android:id="@+id/tvMeetingPath" android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnOpenFolder" android:text="Open Folder" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnClearRecords" android:text="Clear All" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="8dp"/>
+                </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
