@@ -89,7 +89,13 @@ class ProcessingService : Service() {
             val ch = NotificationChannel(CHANNEL, "Model status", NotificationManager.IMPORTANCE_MIN)
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
-        startForeground(NOTIF_ID, buildStaticNotif())
+        // Non-essential service: if promotion is ever denied, die quietly instead
+        // of crashing the process (the models simply stay warm until next time).
+        val promoted = runCatching { startForeground(NOTIF_ID, buildStaticNotif()) }.isSuccess
+        if (!promoted) {
+            runCatching { stopSelf() }
+            return
+        }
         handler.post(poller)
     }
 

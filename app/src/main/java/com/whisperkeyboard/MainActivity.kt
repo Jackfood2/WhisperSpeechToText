@@ -164,6 +164,8 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     tvQueue.text = TranscriptionQueue.status()
                     refreshMeetingButtons()
+                    // Service is the source of truth: flips Recording -> Stopping -> Saved ✓
+                    tvMeetingStatus.text = MeetingRecordService.uiStatus
                     val lastPath = prefs.getString("last_transcript_path", "")
                     val lastAudio = prefs.getString("last_audio_path", "")
                     tvMeetingPath.text = when {

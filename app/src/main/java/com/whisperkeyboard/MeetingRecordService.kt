@@ -31,6 +31,12 @@ class MeetingRecordService : Service() {
         @Volatile var isRunning = false
         /** True after Stop is tapped while remaining chunks still transcribe. */
         @Volatile var isStopping = false
+        /**
+         * Single source of truth for the meeting status line in the app UI.
+         * MainActivity's poll loop displays this, so the text always reflects
+         * reality - including the moment the background save actually finishes.
+         */
+        @Volatile var uiStatus = "Idle"
     }
 
     private var isRecording = false
@@ -46,6 +52,7 @@ class MeetingRecordService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioSaver: FullAudioSaver? = null
     private var audioBaseName = ""
+    private var savedAudioFile: File? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -115,6 +122,9 @@ class MeetingRecordService : Service() {
         isRecording = true
         isRunning = true
         isStopping = false
+        transcriptFile = null
+        savedAudioFile = null
+        uiStatus = "Recording ($mode mode)... tap Stop (continues with screen off)"
         startTimeMs = System.currentTimeMillis()
         segmentCounter = 0
         allText.clear()
@@ -141,8 +151,27 @@ class MeetingRecordService : Service() {
         } else null
 
         try { if (wakeLock?.isHeld == false) wakeLock?.acquire(4*60*60*1000L) } catch (_: Exception) {}
-        startForeground(NOTIFICATION_ID, buildNotification("Starting... (screen may lock, still recording)"))
-        Log.i(TAG, "Meeting started: mode=$mode model=$model lang=$lang - WakeLock held, will survive lock screen")
+        // Explicit mic type (API 29+ documented form - same as the proven bubble path).
+        // Never crash here: without foreground the meeting cannot survive lock screen,
+        // so bail out cleanly instead of taking the app down in a crash loop.
+        val promoted = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, buildNotification("Starting... (screen may lock, still recording)"),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            } else {
+                startForeground(NOTIFICATION_ID, buildNotification("Starting... (screen may lock, still recording)"))
+            }
+        }.isSuccess || runCatching {
+            startForeground(NOTIFICATION_ID, buildNotification("Starting... (screen may lock, still recording)"))
+        }.isSuccess
+        if (!promoted) {
+            Log.e(TAG, "FGS promote denied - meeting recording unavailable on this device state")
+            AppLog.e(TAG, "meeting FGS denied - aborting start")
+            isRecording = false; isRunning = false; isStopping = false
+            runCatching { stopSelf() }
+            return
+        }
+        Log.i(TAG, "Meeting started: mode=$mode model=$model lang=$lang engine=$engine - WakeLock held, will survive lock screen")
 
         recordThread = Thread {
             try {
@@ -261,6 +290,7 @@ class MeetingRecordService : Service() {
         }
         isRecording = false
         isStopping = true
+        uiStatus = "Stopping... transcript saving (wait for queue)"
         Log.i(TAG, "Stop requested - finishing in background...")
         runCatching {
             getSystemService(NotificationManager::class.java)
@@ -278,6 +308,7 @@ class MeetingRecordService : Service() {
                     val format = getSharedPreferences("whisper", MODE_PRIVATE).getString("audio_format", "m4a") ?: "m4a"
                     val audioFile = saver.finish(format)
                     if (audioFile != null) {
+                        savedAudioFile = audioFile
                         getSharedPreferences("whisper", MODE_PRIVATE).edit()
                             .putString("last_audio_path", audioFile.absolutePath).apply()
                         Log.i(TAG, "Audio saved: ${audioFile.absolutePath}")
@@ -304,6 +335,13 @@ class MeetingRecordService : Service() {
     private fun finishStop() {
         val path = transcriptFile?.absolutePath ?: "unknown"
         Log.i(TAG, "Meeting finished: $path")
+        // Publish the final status BEFORE tearing down, so the app UI (which polls
+        // uiStatus) flips from "Stopping..." to the saved result. This was the bug:
+        // nothing ever updated the line after the background save completed.
+        val parts = mutableListOf<String>()
+        transcriptFile?.name?.let { parts.add(it) }
+        savedAudioFile?.name?.let { parts.add(it) }
+        uiStatus = if (parts.isEmpty()) "Saved ✓ (nothing recorded)" else "Saved ✓ ${parts.joinToString(" + ")}"
         runCatching { getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID) }
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
         runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }

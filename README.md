@@ -28,6 +28,15 @@
 
 ## Changelog
 
+### v2.7.4 (2026-09-06) — Queue counter crash fixed (found by on-device test)
+- **Crash:** a progress tick landing just after the queue drained called `coerceIn(1, 0)` → killed the whole app mid-meeting-finalize. Counters now return `0/0` when idle. Caught via adb-driven meeting test, not user report.
+
+### v2.7.3 (2026-09-06) — Keyboard crash-loop fixed (mic-FGS denied from IME)
+- **Critical:** on some devices the mic foreground promotion is denied from a keyboard context → the whole IME crashed on every input tap (keyboard flashed then vanished, recording stuck). Promotion is now best-effort everywhere: recording/transcription continue, only lock-screen continuation degrades where denied. Meeting/bubble abort cleanly instead of crash-looping if ever denied.
+
+### v2.7.2 (2026-09-06) — Meeting status reaches "Saved ✓"
+- The meeting status line was stuck on "Stopping... transcript saving" forever — nothing reported back when the background save finished. The service now publishes its status and the app displays it: Recording → Stopping → **Saved ✓ `meeting_*.txt + *_audio.m4a`**.
+
 ### v2.7.1 (2026-09-06) — 16KB page-size support + engine race/RAM audit
 - **16KB compatible:** native libs rebuilt with NDK 28 + 16384 page alignment (`libwhisper_jni.so`, `libc++_shared.so`). Moonshine's bundled libs were already aligned — verified with readelf.
 - **Engine-switch hardening:** Moonshine model download no longer holds the engine lock (was stalling all transcription for minutes on first run); Stop/Skip during Moonshine now drops the chunk instead of filing it under failed; closed-instance crashes guarded.

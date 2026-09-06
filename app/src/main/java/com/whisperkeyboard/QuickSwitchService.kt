@@ -81,11 +81,19 @@ class QuickSwitchService : Service() {
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "Quick switch", NotificationManager.IMPORTANCE_MIN))
         }
         // CRITICAL: declare the microphone FGS type at start time - without it Android 14+
-        // serves SILENCE to the mic whenever no app component (activity/IME) is visible
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID, buildNotif(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } else {
-            startForeground(NOTIF_ID, buildNotif())
+        // serves SILENCE to the mic whenever no app component (activity/IME) is visible.
+        // Never crash here (v2.7.3 lesson): if the device denies mic-FGS, bail out cleanly.
+        val promoted = runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                startForeground(NOTIF_ID, buildNotif(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            } else {
+                startForeground(NOTIF_ID, buildNotif())
+            }
+        }.isSuccess
+        if (!promoted) {
+            AppLog.e("Bubble", "FGS promote denied - bubble disabled on this device state")
+            runCatching { stopSelf() }
+            return
         }
         showBubble()
         AppLog.i("Bubble", "shown")

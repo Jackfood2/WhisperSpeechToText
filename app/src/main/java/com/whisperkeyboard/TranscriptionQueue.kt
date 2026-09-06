@@ -189,6 +189,9 @@ object TranscriptionQueue {
     /** Position info for UI: 1-based index of job being processed / total submitted in batch (clamped). */
     fun batchPosition(): Pair<Int, Int> {
         val total = maxOf(submittedCount.get(), completedCount.get())
+        // total==0 happens transiently (counters reset on worker idle-exit while a
+        // trailing progress tick is still in flight). Never coerceIn(1, 0) - crash.
+        if (total <= 0) return Pair(0, 0)
         val cur = (completedCount.get() + if (workerRunning.get() && pendingCount.get() > 0) 1 else 0).coerceIn(1, total)
         return Pair(cur, total)
     }

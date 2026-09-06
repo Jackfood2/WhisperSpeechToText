@@ -341,10 +341,16 @@ class WhisperKeyboardService : InputMethodService() {
     }
 
     private fun startImeForeground() {
+        // Plain startService (NOT startForegroundService): the holder promotes
+        // itself best-effort. FGS-start would OBLIGATE promotion within ~10s and
+        // crash the whole IME on devices that deny mic-FGS from a keyboard.
         try {
             val intent = Intent(this, ImeRecordService::class.java).apply { action = "START" }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
-        } catch (e: Exception) { Log.w(TAG, "foreground start failed: ${e.message}") }
+            startService(intent)
+        } catch (e: Exception) {
+            // holder unavailable - recording still works while the keyboard is visible
+            AppLog.w(TAG, "ime holder unavailable, continuing without it: ${e.message}")
+        }
     }
     private fun stopImeForeground() {
         try { val intent = Intent(this, ImeRecordService::class.java).apply { action = "STOP" }; startService(intent) } catch (_: Exception) {}
