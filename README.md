@@ -1,13 +1,13 @@
-# Whisper Speech to Text — Offline Android IME + Meeting Recorder
+# Speech to Text — Offline Android IME + Meeting Recorder
 
-> **On-device Whisper (tiny / base / small / medium) for any arm64-v8a Android 8.0+ device. No internet after model download. Queue + adaptive progress + lock-screen recording.**
+> **On-device Whisper + Moonshine v2 (tiny / base / small / medium) for any arm64-v8a Android 8.0+ device. No internet after model download. Queue + adaptive progress + lock-screen recording.**
 
 ## ⬇ Download the APK
 
 **[→ Download the latest APK from Releases](https://github.com/Jackfood2/WhisperSpeechToText/releases/latest)**
 
 1. Tap the APK (`WhisperSpeechToText.apk`) → allow *Install unknown apps* if asked
-2. Open **Whisper Speech to Text** → enable the keyboard → pick a voice model → speak
+2. Open **Speech to Text** → enable the keyboard → pick engine + voice model → speak
 
 ### If Google Play Protect blocks the install ("App blocked to protect your device")
 
@@ -27,6 +27,29 @@
 [![Release](https://img.shields.io/github/v/release/Jackfood2/WhisperSpeechToText?label=version)](https://github.com/Jackfood2/WhisperSpeechToText/releases/latest)
 
 ## Changelog
+
+### v2.7.1 (2026-09-06) — 16KB page-size support + engine race/RAM audit
+- **16KB compatible:** native libs rebuilt with NDK 28 + 16384 page alignment (`libwhisper_jni.so`, `libc++_shared.so`). Moonshine's bundled libs were already aligned — verified with readelf.
+- **Engine-switch hardening:** Moonshine model download no longer holds the engine lock (was stalling all transcription for minutes on first run); Stop/Skip during Moonshine now drops the chunk instead of filing it under failed; closed-instance crashes guarded.
+- **RAM guarantees:** switching engines evicts the idle one (never two giants resident); unloader re-armed after every batch; OS memory pressure (`onTrimMemory`) drops idle models.
+
+### v2.7.0 (2026-09-06) — Dual engine: Whisper + Moonshine v2, renamed Speech to Text
+- **App renamed** to **Speech to Text** (was Whisper Speech to Text) — same package, settings and models preserved across upgrade.
+- **Two pipelines, one app:** Settings → Engine → **Whisper** (multilingual, ~100 languages) or **Moonshine v2** (English-only, 5–40x faster). Model size picked per engine (tiny/base/small/medium). Engine + model change **only in the app Settings page**.
+- **Yellow keyboard badge** shows the live pipeline (e.g. `MOONSHINE · small`) — read-only, like MoonshineAndroid. Switching engine in Settings updates the badge instantly.
+- Jobs capture the engine at record time, so switching mid-queue never corrupts in-flight transcription. Progress stats, dashboard and idle-unload are engine-aware (`whisper_small` vs `moonshine_small` tracked separately).
+- Note: Moonshine `.ort` bundles live in each app's private storage — if you used the standalone Moonshine app, its models download once more here (~34–245 MB). You can uninstall the standalone Moonshine app afterwards.
+
+### v2.6.0 (2026-09-06) — Full audio archive (WAV / M4A)
+- **Save full audio:** every meeting / keyboard / bubble session can now save its complete audio next to the transcript in `Documents/WhisperNotes` (`meeting_*_audio.m4a`, `ime_*_audio.m4a`…). Toggles + format selector in Settings (WAV lossless ~1.9 MB/min, M4A/AAC ~0.24 MB/min, M4A default with automatic WAV fallback).
+- **Why no MP3:** Android ships no MP3 *encoder* (decode only) — real MP3 would need a bundled LAME/FFmpeg native lib. M4A plays on Android/iOS/Windows.
+- Auto-pruning keeps the newest 50 audio files / 30 days; temp files never sit in RAM (streamed to cache during recording).
+
+### v2.5.0 (2026-09-06) — Auto-record on switch, silent status icon, meeting crash fixed
+- **Auto-record on switch:** switching to the Whisper keyboard starts recording immediately (fresh switch, nothing pending). No mic tap needed.
+- **Close-safe processing:** tapping X mid-recording stops the mic but transcription continues; switching back to Whisper auto-types the finished text (no second recording). Unclaimed transcripts are **cleared after 2 min**, never typed stale.
+- **One silent status icon:** the animated upload icon, processing text and unload-countdown cards are gone. A single quiet dot (like wifi) shows while the model is in memory and disappears on unload.
+- **Meeting Start/Stop crash fixed:** Stop no longer blocks the main thread (the old wait condition could never go false → ANR just as the TXT finished saving). Start and Stop are now mutually exclusive — exactly one is ever enabled; both lock while the queue drains.
 
 ### v2.4.2 (2026-08-26) — Enter key on keyboard
 - New **↵ Enter** button stacked under **⌫ Backspace** on the right side of the keyboard. Tap inserts a new line in the focused field (hold repeats). Uses `commitText("\n")` with a key-event fallback so it works in both multi-line and single-line fields.

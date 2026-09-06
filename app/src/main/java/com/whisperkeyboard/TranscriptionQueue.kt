@@ -23,7 +23,9 @@ object TranscriptionQueue {
         val model: String,
         val lang: String,
         val onResult: (String) -> Unit,
-        val onError: (String) -> Unit
+        val onError: (String) -> Unit,
+        /** Captured at enqueue time - switching engine mid-queue never corrupts in-flight jobs. */
+        val engine: String = SttEngines.WHISPER
     )
 
     interface ProgressListener { fun onProgress(pct: Int) }
@@ -49,49 +51,47 @@ object TranscriptionQueue {
 
     // ---- adaptive stats ----
 
-    private fun defaultRatio(model: String): Double = when (model) {
-        "tiny" -> 0.06; "base" -> 0.10; "small" -> 0.28; "medium" -> 0.65; else -> 0.30
-    }
+    private fun defaultRatio(engine: String, model: String): Double =
+        SttEngines.defaultRatio(engine, model)
 
-    private fun getAvgRatio(ctx: Context, model: String): Double {
+    private fun getAvgRatio(ctx: Context, engine: String, model: String): Double {
         return try {
             val prefs = ctx.getSharedPreferences("whisper_stats", Context.MODE_PRIVATE)
-            // per-model EMA from the FIRST real sample onward - never fall back to the
-            // cross-model global for estimation (a base-model average would misestimate small)
-            val perCount = prefs.getInt("count_$model", 0)
+            // per-engine+model EMA from the FIRST real sample onward - whisper_small and
+            // moonshine_small measure very different speeds and must never mix.
+            val key = SttEngines.statsKey(engine, model)
+            val perCount = prefs.getInt("count_$key", 0)
             if (perCount >= 1) {
-                val r = prefs.getFloat("ratio_$model", defaultRatio(model).toFloat()).toDouble()
-                Log.i(TAG, "avgRatio $model = $r from $perCount samples (per-model)")
+                val r = prefs.getFloat("ratio_$key", defaultRatio(engine, model).toFloat()).toDouble()
+                Log.i(TAG, "avgRatio $key = $r from $perCount samples (per-engine)")
                 return r
             }
-            defaultRatio(model)
-        } catch (_: Exception) { defaultRatio(model) }
+            defaultRatio(engine, model)
+        } catch (_: Exception) { defaultRatio(engine, model) }
     }
 
-    private fun recordStats(ctx: Context, model: String, audioSec: Double, transcribeSec: Double) {
+    private fun recordStats(ctx: Context, engine: String, model: String, audioSec: Double, transcribeSec: Double) {
         try {
             if (audioSec < 0.5 || transcribeSec < 0.3) return
             val ratio = (transcribeSec / audioSec).coerceIn(0.02, 5.0)
             val prefs = ctx.getSharedPreferences("whisper_stats", Context.MODE_PRIVATE)
             val ed = prefs.edit()
-            // per-model EXPONENTIAL moving average (alpha=0.2 -> ~last 5 runs dominate):
-            // adapts to current device speed (thermals/background load) while still averaging
-            // every past run. A plain cumulative mean goes stale after ~50 samples (<2% shift),
-            // which made the progress bar look like it had "no effect".
-            val cnt = prefs.getInt("count_$model", 0)
-            val old = prefs.getFloat("ratio_$model", ratio.toFloat()).toDouble()
+            // per-engine+model EXPONENTIAL moving average (alpha=0.2 -> ~last 5 runs dominate)
+            val key = SttEngines.statsKey(engine, model)
+            val cnt = prefs.getInt("count_$key", 0)
+            val old = prefs.getFloat("ratio_$key", ratio.toFloat()).toDouble()
             val newAvg = if (cnt == 0) ratio else old * 0.8 + ratio * 0.2
-            ed.putFloat("ratio_$model", newAvg.toFloat())
-            ed.putInt("count_$model", cnt + 1)
+            ed.putFloat("ratio_$key", newAvg.toFloat())
+            ed.putInt("count_$key", cnt + 1)
             // global (display/debug only - NOT used for estimates)
             val gCnt = prefs.getInt("count_global", 0)
             val gOld = prefs.getFloat("ratio_global", ratio.toFloat()).toDouble()
             val gNew = if (gCnt == 0) ratio else gOld * 0.9 + ratio * 0.1
             ed.putFloat("ratio_global", gNew.toFloat())
             ed.putInt("count_global", gCnt + 1)
-            // also store last audio/time for debug
-            ed.putFloat("last_audio_${model}", audioSec.toFloat())
-            ed.putFloat("last_time_${model}", transcribeSec.toFloat())
+            // also store last audio/time for debug (engine-qualified)
+            ed.putFloat("last_audio_$key", audioSec.toFloat())
+            ed.putFloat("last_time_$key", transcribeSec.toFloat())
             ed.apply()
             Log.i(TAG, "recordStats model=$model audio=${String.format("%.1f", audioSec)}s time=${String.format("%.1f", transcribeSec)}s ratio=${String.format("%.3f", ratio)} -> ema $model=${String.format("%.3f", newAvg)} global=${String.format("%.3f", gNew)} cnt $cnt/$gCnt")
         } catch (e: Exception) { Log.w(TAG, "recordStats failed: ${e.message}") }
@@ -113,18 +113,18 @@ object TranscriptionQueue {
         } catch (_: Exception) { 5.0 }
     }
 
-    private fun expectedTranscribeSec(ctx: Context, model: String, audioSec: Double): Double {
-        val ratio = getAvgRatio(ctx, model)
+    private fun expectedTranscribeSec(ctx: Context, engine: String, model: String, audioSec: Double): Double {
+        val ratio = getAvgRatio(ctx, engine, model)
         // overhead 0.6s for init + commit
         return maxOf(1.2, audioSec * ratio + 0.6)
     }
 
-    private fun startSimulatedProgress(ctx: Context, model: String, wav: File) {
+    private fun startSimulatedProgress(ctx: Context, engine: String, model: String, wav: File) {
         stopSimulatedProgress()
         val audioSec = estimateSeconds(wav)
         currentFileSec = audioSec
-        val expected = expectedTranscribeSec(ctx, model, audioSec)
-        Log.i(TAG, "startProgress audio=${String.format("%.1f", audioSec)}s model=$model expected=${String.format("%.1f", expected)}s ratio=${String.format("%.3f", getAvgRatio(ctx, model))}")
+        val expected = expectedTranscribeSec(ctx, engine, model, audioSec)
+        Log.i(TAG, "startProgress audio=${String.format("%.1f", audioSec)}s $engine/$model expected=${String.format("%.1f", expected)}s ratio=${String.format("%.3f", getAvgRatio(ctx, engine, model))}")
         notifyProgress(3)
         var elapsed = 0.0
         progressTimer = java.util.Timer(true)
@@ -181,7 +181,7 @@ object TranscriptionQueue {
         AppLog.i(TAG, "STOP ALL requested")
         if (workerRunning.get()) skipCurrentFlag.set(true)
         stopAllFlag.set(true)
-        WhisperEngine.cancelCurrent()
+        SttEngines.cancelAll()
         paused.set(false)
         return clearQueue()
     }
@@ -207,7 +207,7 @@ object TranscriptionQueue {
         paused.set(true)
         // drop the in-flight job too - user wants immediate response, not a long tail
         if (workerRunning.get()) skipCurrentFlag.set(true)
-        WhisperEngine.cancelCurrent()
+        SttEngines.cancelAll()
         Log.i(TAG, "Queue paused (current job cancelled)")
         AppLog.i(TAG, "paused - current job cancelled")
     }
@@ -222,7 +222,7 @@ object TranscriptionQueue {
         // also cancel + discard whatever is processing right now (flag only matters if a job is live,
         // otherwise it would silently swallow the NEXT job)
         if (workerRunning.get()) skipCurrentFlag.set(true)
-        WhisperEngine.cancelCurrent()
+        SttEngines.cancelAll()
         Log.i(TAG, "Cleared $deleted queued files (+cancelled current)")
         AppLog.i(TAG, "clearQueue: $deleted dropped, current cancelled")
         return deleted
@@ -260,13 +260,16 @@ object TranscriptionQueue {
                             Log.i(TAG, "Worker idle")
                             stopSimulatedProgress(); notifyProgress(0)
                             submittedCount.set(0); completedCount.set(0); stopAllFlag.set(false); currentPct = 0
+                            // Make sure the idle-unloader is armed after every batch, so a
+                            // model can never sit pinned in RAM with no poller watching it.
+                            ProcessingService.notifyActivity()
                             break
                         }
-                        currentModel = job.model
-                        AppLog.i(TAG, "process ${job.model}/${job.lang} ${job.wavFile.name} (${job.wavFile.length() / 1024} KB)")
+                        currentModel = "${job.engine}/${job.model}"
+                        AppLog.i(TAG, "process ${job.engine}/${job.model}/${job.lang} ${job.wavFile.name} (${job.wavFile.length() / 1024} KB)")
                         val audioSec = estimateSeconds(job.wavFile)
                         val startMs = System.currentTimeMillis()
-                        startSimulatedProgress(job.context, job.model, job.wavFile)
+                        startSimulatedProgress(job.context, job.engine, job.model, job.wavFile)
                         var success = false
                         var resultText = ""
                         var errorMsg = ""
@@ -274,9 +277,16 @@ object TranscriptionQueue {
                         while (attempt < 2 && !success) {
                             attempt++
                             try {
-                                val modelFile = ModelManager.modelFile(job.context, job.model)
-                                if (!modelFile.exists() || modelFile.length() < 1_000_000) throw IllegalStateException("Model ggml-${job.model}.bin not found. Download it in app first.")
-                                resultText = WhisperEngine.transcribe(modelFile.absolutePath, job.wavFile.absolutePath, job.lang).trim()
+                                if (job.engine == SttEngines.MOONSHINE) {
+                                    if (!ModelManager.isMoonshineReady(job.context, job.model) && !MoonshineEngine.isLoaded(job.model)) {
+                                        val ok = MoonshineEngine.ensureModel(job.context, job.model, "en")
+                                        if (!ok) throw IllegalStateException("Moonshine model ${job.model} not ready. Download it in app first. ${MoonshineEngine.lastError}")
+                                    }
+                                } else {
+                                    val modelFile = ModelManager.modelFile(job.context, job.model)
+                                    if (!modelFile.exists() || modelFile.length() < 1_000_000) throw IllegalStateException("Model ggml-${job.model}.bin not found. Download it in app first.")
+                                }
+                                resultText = SttEngines.transcribe(job.context, job.engine, job.model, job.wavFile, job.lang)
                                 if (resultText.startsWith("ERROR: cancelled")) {
                                     // user pressed Clear/Stop/Pause - do NOT retry, just drop
                                     Log.i(TAG, "job cancelled by user")
@@ -291,10 +301,10 @@ object TranscriptionQueue {
                                     throw IllegalStateException(resultText)
                                 }
                                 Log.i(TAG, "Result: ${resultText.take(120)}")
-                                AppLog.i(TAG, "done ${job.model} in ${(System.currentTimeMillis() - startMs) / 1000.0}s: ${resultText.take(50)}")
+                                AppLog.i(TAG, "done ${job.engine}/${job.model} in ${(System.currentTimeMillis() - startMs) / 1000.0}s: ${resultText.take(50)}")
                                 success = true
                                 val elapsedSec = (System.currentTimeMillis() - startMs) / 1000.0
-                                recordStats(job.context, job.model, audioSec, elapsedSec)
+                                recordStats(job.context, job.engine, job.model, audioSec, elapsedSec)
                                 stopSimulatedProgress(); notifyProgress(100)
                                 Thread.sleep(150) // brief pause so the 100% tick is visible
                             } catch (e: Exception) {

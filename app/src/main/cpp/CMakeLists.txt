@@ -36,6 +36,10 @@ add_library(whisper_jni SHARED
     whisper_jni.c
 )
 
+# 16KB page-size support (Android 15+): LOAD segments must be 16384-aligned,
+# otherwise the .so fails to load on 16KB-page devices. NDK r28 + this flag.
+target_link_options(whisper_jni PRIVATE "-Wl,-z,max-page-size=16384")
+
 target_include_directories(whisper_jni PRIVATE
     ${WHISPER_DIR}/include
     ${WHISPER_DIR}/src

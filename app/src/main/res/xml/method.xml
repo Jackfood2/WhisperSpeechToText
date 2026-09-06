@@ -3,6 +3,6 @@
     android:supportsSwitchingToNextInputMethod="true">
     <subtype
         android:imeSubtypeMode="keyboard"
-        android:label="Whisper Speech to Text"
+        android:label="Speech to Text"
         android:isDefault="true"/>
 </input-method>

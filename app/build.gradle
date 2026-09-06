@@ -6,14 +6,14 @@ plugins {
 android {
     namespace 'com.whisperkeyboard'
     compileSdk 34
-    ndkVersion "26.1.10909125"
+    ndkVersion "28.2.13676358"
 
     defaultConfig {
         applicationId "com.whisperkeyboard"
         minSdk 26
         targetSdk 34
-        versionCode 57
-        versionName "2.4.2"
+        versionCode 61
+        versionName "2.7.1"
 
         ndk {
             abiFilters 'arm64-v8a'
@@ -89,4 +89,7 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
     implementation 'androidx.preference:preference-ktx:1.2.1'
+    // Moonshine v2 - on-device streaming STT, English (includes ONNX Runtime, no NDK needed)
+    implementation 'ai.moonshine:moonshine-voice:0.1.5'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }

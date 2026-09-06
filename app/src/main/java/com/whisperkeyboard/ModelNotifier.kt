@@ -1,62 +1,24 @@
 package com.whisperkeyboard
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import androidx.core.app.NotificationCompat
-
 /**
- * ONE notification for the model's whole lifecycle. Loaded and unloaded states reuse the
- * SAME id, so the card is always a live status - never two independent notifications that
- * can disagree (e.g. swipe the "unloaded" one and still see "loaded").
+ * Model lifecycle signals.
  *
- * Clarity rules:
- *  - Loaded:  persists until replaced or swiped (model really is in memory).
- *  - Unloaded: replaces the loaded card, then self-dismisses after ~8s so a stale state
- *              can't linger once memory is actually free.
+ * There is exactly ONE user-visible indicator for the model: the silent
+ * status-bar icon owned by [ProcessingService] (shown while the model is in
+ * memory, removed on unload - wifi-style). These hooks only ensure that icon
+ * exists / keep the idle-unload timer honest. No separate notifications, no
+ * countdown text, no toasts.
  */
 object ModelNotifier {
 
-    private const val CHANNEL = "model_status"
-    private const val ID = 2001 // single id for BOTH states
-
-    private fun ensureChannel(ctx: android.content.Context) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL, "Model status", NotificationManager.IMPORTANCE_DEFAULT)
-            ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
-        }
-    }
-
-    private fun build(ctx: android.content.Context, title: String, text: String, icon: Int, autoDismissMs: Long = 0L): android.app.Notification {
-        val b = NotificationCompat.Builder(ctx, CHANNEL)
-            .setSmallIcon(icon)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setOngoing(false)
-            .setAutoCancel(true)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-        if (autoDismissMs > 0) b.setTimeoutAfter(autoDismissMs)
-        return b.build()
-    }
-
     fun loaded(fileName: String, sizeMb: Long) {
-        val ctx = WhisperApp.holder ?: return
-        try {
-            ensureChannel(ctx)
-            ctx.getSystemService(NotificationManager::class.java)
-                .notify(ID, build(ctx, "Whisper model loaded", "$fileName (${sizeMb}MB) in memory - ready to transcribe",
-                    android.R.drawable.stat_sys_download_done))
-        } catch (_: Exception) {}
+        AppLog.i("Model", "loaded $fileName (${sizeMb}MB)")
+        ProcessingService.notifyActivity() // ensure the status icon is up
     }
 
     fun unloaded(fileName: String?) {
-        val ctx = WhisperApp.holder ?: return
-        try {
-            ensureChannel(ctx)
-            ctx.getSystemService(NotificationManager::class.java)
-                .notify(ID, build(ctx, "Whisper model unloaded", "${fileName ?: "model"} released - memory freed, battery protected",
-                    android.R.drawable.stat_notify_sync_noanim, autoDismissMs = 8_000))
-        } catch (_: Exception) {}
-        toast("Model unloaded - memory freed")
+        // Icon removal is handled by ProcessingService itself after unload.
+        AppLog.i("Model", "unloaded ${fileName ?: "model"}")
     }
 
     fun toast(msg: String) {

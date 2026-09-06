@@ -27,6 +27,20 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvQueue: TextView
     private lateinit var progressTranscribe: ProgressBar
     private lateinit var radioMode: RadioGroup
+    private lateinit var btnStartMeeting: Button
+    private lateinit var btnStopMeeting: Button
+
+    /**
+     * Start and Stop are mutually exclusive: exactly one is enabled at any
+     * time. While stopping (background queue drain) both stay disabled so a
+     * double-tap can never launch a second session mid-teardown.
+     */
+    private fun refreshMeetingButtons() {
+        val running = MeetingRecordService.isRunning
+        val stopping = MeetingRecordService.isStopping
+        btnStartMeeting.isEnabled = !running && !stopping
+        btnStopMeeting.isEnabled = running && !stopping
+    }
 
     private val permRequestCode = 100
 
@@ -55,6 +69,8 @@ class MainActivity : AppCompatActivity() {
         tvQueue = findViewById(R.id.tvQueue)
         progressTranscribe = findViewById(R.id.progressTranscribe)
         radioMode = findViewById(R.id.radioMode)
+        btnStartMeeting = findViewById(R.id.btnStartMeeting)
+        btnStopMeeting = findViewById(R.id.btnStopMeeting)
 
         // gear icon -> comprehensive settings
         findViewById<Button>(R.id.btnOpenSettings).setOnClickListener {
@@ -68,28 +84,41 @@ class MainActivity : AppCompatActivity() {
             (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
         }
 
-        findViewById<Button>(R.id.btnStartMeeting).setOnClickListener {
+        btnStartMeeting.setOnClickListener {
+            if (MeetingRecordService.isRunning || MeetingRecordService.isStopping) {
+                Toast.makeText(this, "Meeting already recording", Toast.LENGTH_SHORT).show()
+                refreshMeetingButtons()
+                return@setOnClickListener
+            }
             if (!hasPermissions()) { requestPermissions(); return@setOnClickListener }
             val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
-            val lang = prefs.getString("lang", "auto") ?: "auto"
+            val lang = SttEngines.jobLang(this)
             val model = prefs.getString("model", "small") ?: "small"
             val mode = if (radioMode.checkedRadioButtonId == R.id.radioType) "type" else "txt"
             val intent = Intent(this, MeetingRecordService::class.java)
             intent.action = "START"
             intent.putExtra("model", model)
             intent.putExtra("lang", lang)
+            intent.putExtra("engine", SttEngines.current(this))
             intent.putExtra("mode", mode)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
             tvMeetingStatus.text = "Recording ($mode mode)... tap Stop (continues with screen off)"
             Toast.makeText(this, "Meeting recording started ($mode)", Toast.LENGTH_SHORT).show()
+            refreshMeetingButtons()
         }
 
-        findViewById<Button>(R.id.btnStopMeeting).setOnClickListener {
+        btnStopMeeting.setOnClickListener {
+            if (!MeetingRecordService.isRunning) {
+                Toast.makeText(this, "Not recording", Toast.LENGTH_SHORT).show()
+                refreshMeetingButtons()
+                return@setOnClickListener
+            }
             val intent = Intent(this, MeetingRecordService::class.java)
             intent.action = "STOP"
             startService(intent)
             tvMeetingStatus.text = "Stopping... transcript saving (wait for queue)"
             Toast.makeText(this, "Stopping - transcript will be saved to Documents/WhisperNotes", Toast.LENGTH_LONG).show()
+            refreshMeetingButtons()
         }
 
         findViewById<Button>(R.id.btnDonate).setOnClickListener {
@@ -115,14 +144,16 @@ class MainActivity : AppCompatActivity() {
 
         requestPermissions()
 
-        // preload last-used model
+        // preload last-used engine + model
         val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
         val lastModel = prefs.getString("model", "small") ?: "small"
+        val lastEngine = prefs.getString("engine", SttEngines.WHISPER) ?: SttEngines.WHISPER
         lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    val mf = ModelManager.modelFile(applicationContext, lastModel)
-                    if (mf.exists() && mf.length() > 1_000_000 && !WhisperEngine.isLoaded(mf.absolutePath)) WhisperEngine.ensureModel(mf.absolutePath)
+                    if (!SttEngines.isLoaded(applicationContext, lastEngine, lastModel)) {
+                        SttEngines.ensureModel(applicationContext, lastEngine, lastModel, SttEngines.jobLang(applicationContext))
+                    }
                 }
             } catch (_: Throwable) {}
         }
@@ -132,11 +163,24 @@ class MainActivity : AppCompatActivity() {
                 kotlinx.coroutines.delay(800)
                 withContext(Dispatchers.Main) {
                     tvQueue.text = TranscriptionQueue.status()
+                    refreshMeetingButtons()
                     val lastPath = prefs.getString("last_transcript_path", "")
-                    if (!lastPath.isNullOrEmpty()) tvMeetingPath.text = "Last: $lastPath"
+                    val lastAudio = prefs.getString("last_audio_path", "")
+                    tvMeetingPath.text = when {
+                        !lastPath.isNullOrEmpty() && !lastAudio.isNullOrEmpty() -> "Last: $lastPath\nAudio: $lastAudio"
+                        !lastPath.isNullOrEmpty() -> "Last: $lastPath"
+                        !lastAudio.isNullOrEmpty() -> "Audio: $lastAudio"
+                        else -> ""
+                    }
                 }
             }
         }
+        refreshMeetingButtons()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::btnStartMeeting.isInitialized) refreshMeetingButtons()
     }
 
     override fun onDestroy() {

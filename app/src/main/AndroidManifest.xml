@@ -17,7 +17,7 @@
     <application
         android:name=".WhisperApp"
         android:allowBackup="true"
-        android:label="Whisper Speech to Text"
+        android:label="Speech to Text"
         android:theme="@style/Theme.WhisperKeyboard"
         android:requestLegacyExternalStorage="true"
         android:icon="@android:drawable/ic_btn_speak_now">
@@ -25,7 +25,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="Whisper Speech to Text">
+            android:label="Speech to Text">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -42,7 +42,7 @@
 
         <service
             android:name=".WhisperKeyboardService"
-            android:label="Whisper Speech to Text"
+            android:label="Speech to Text"
             android:permission="android.permission.BIND_INPUT_METHOD"
             android:exported="true">
             <intent-filter>
@@ -55,7 +55,7 @@
 
         <service
             android:name=".ProcessingService"
-            android:label="Whisper Processing"
+            android:label="Speech Processing"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
@@ -65,7 +65,7 @@
 
         <service
             android:name=".WhisperAccessibilityService"
-            android:label="Whisper Typing Bridge"
+            android:label="Speech Typing Bridge"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -83,7 +83,7 @@
             android:foregroundServiceType="microphone"/>
 <service
             android:name=".WhisperRecognitionService"
-            android:label="Whisper Voice Typing"
+            android:label="Speech Voice Typing"
             android:permission="android.permission.BIND_RECOGNITION_SERVICE"
             android:exported="true">
             <intent-filter>

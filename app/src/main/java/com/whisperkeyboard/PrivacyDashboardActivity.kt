@@ -84,13 +84,17 @@ class PrivacyDashboardActivity : AppCompatActivity() {
                 sb.appendLine("Models stored: getExternalFilesDir/models (cleared on uninstall)")
                 sb.appendLine("Transcripts: Documents/WhisperNotes/*.txt (you control)")
                 sb.appendLine()
-                sb.appendLine("Adaptive baseline (per-model avg ratio):")
-                for (m in listOf("tiny","base","small","medium")) {
-                    val cnt = prefs.getInt("count_$m", 0)
-                    val ratio = prefs.getFloat("ratio_$m", 0f)
-                    val lastA = prefs.getFloat("last_audio_$m", 0f)
-                    val lastT = prefs.getFloat("last_time_$m", 0f)
-                    sb.appendLine("  $m: ${if(cnt>0) String.format("%.3f", ratio) else "-"}  cnt=$cnt  last ${String.format("%.1f", lastA)}s -> ${String.format("%.1f", lastT)}s")
+                sb.appendLine("Adaptive baseline (per-engine avg ratio):")
+                for (e in listOf(SttEngines.WHISPER, SttEngines.MOONSHINE)) {
+                    for (m in listOf("tiny","base","small","medium")) {
+                        val key = SttEngines.statsKey(e, m)
+                        val cnt = prefs.getInt("count_$key", 0)
+                        if (cnt == 0) continue
+                        val ratio = prefs.getFloat("ratio_$key", 0f)
+                        val lastA = prefs.getFloat("last_audio_$key", 0f)
+                        val lastT = prefs.getFloat("last_time_$key", 0f)
+                        sb.appendLine("  $key: ${String.format("%.3f", ratio)}  cnt=$cnt  last ${String.format("%.1f", lastA)}s -> ${String.format("%.1f", lastT)}s")
+                    }
                 }
                 val gCnt = prefs.getInt("count_global", 0)
                 val gRatio = prefs.getFloat("ratio_global", 0f)

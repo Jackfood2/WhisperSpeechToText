@@ -59,7 +59,7 @@ object TextRouter {
                 val clipOn = ctx.getSharedPreferences("whisper", Context.MODE_PRIVATE).getBoolean("out_clipboard", true)
                 OutstandingStore.add(ctx, text)
                 toastIt(if (clipOn) "Held (${OutstandingStore.count(ctx)}) + copied to clipboard - refocus a field to type"
-                        else "Held (${OutstandingStore.count(ctx)}) - open Whisper keyboard to insert")
+                        else "Held (${OutstandingStore.count(ctx)}) - open Speech keyboard to insert")
             }
             finish()
             return
@@ -85,7 +85,7 @@ object TextRouter {
             }
             // one-time guidance when the bridge is off and another keyboard owns the field
             if (attempt == 8 && !WhisperAccessibilityService.isReady()) {
-                toastIt("Enable 'Whisper Typing Bridge' in Accessibility to type here")
+                toastIt("Enable 'Speech Typing Bridge' in Accessibility to type here")
             }
         }
         // 3) keep retrying (screen may unlock; keyboard may bind shortly)

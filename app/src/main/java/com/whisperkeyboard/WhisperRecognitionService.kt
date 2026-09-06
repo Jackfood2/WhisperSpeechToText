@@ -26,16 +26,16 @@ class WhisperRecognitionService : RecognitionService() {
     override fun onStartListening(recognizerIntent: Intent?, callback: Callback?) {
         val cb = callback ?: return
         AppLog.i(TAG, "onStartListening")
+        val engine = SttEngines.current(this)
         val model = getSharedPreferences("whisper", MODE_PRIVATE).getString("model", "small") ?: "small"
-        val mf = ModelManager.modelFile(this, model)
-        if (!mf.exists() || mf.length() < 1_000_000) {
-            AppLog.e(TAG, "$model not downloaded")
+        if (!SttEngines.isReady(this, engine, model)) {
+            AppLog.e(TAG, "$engine/$model not downloaded")
             cb.error(SpeechRecognizer.ERROR_CLIENT)
             return
         }
         if (ContextCompatMissing()) { cb.error(SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS); return }
         listening = true
-        val lang = getSharedPreferences("whisper", MODE_PRIVATE).getString("lang", "auto") ?: "auto"
+        val lang = SttEngines.jobLang(this)
         thread = Thread {
             var pcm: ByteArrayOutputStream? = null
             try {
@@ -72,7 +72,7 @@ class WhisperRecognitionService : RecognitionService() {
                 }
                 val wav = File(cacheDir, "recog_${System.currentTimeMillis()}.wav")
                 AudioUtils.pcmBytesToWavFile(bytes, wav)
-                val txt = WhisperEngine.transcribe(mf.absolutePath, wav.absolutePath, lang).trim()
+                val txt = SttEngines.transcribe(this, engine, model, wav, lang)
                 wav.delete()
                 AppLog.i(TAG, "result: ${txt.take(60)}")
                 if (txt.isEmpty() || txt.startsWith("ERROR") || AudioUtils.isNoSpeechText(txt)) {

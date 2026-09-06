@@ -26,6 +26,7 @@ class SettingsActivity : AppCompatActivity() {
         if (now - lastToastAt > 700) { lastToastAt = now; Toast.makeText(this, "Setting saved", Toast.LENGTH_SHORT).show() }
     }
 
+    private lateinit var spinnerEngine: Spinner
     private lateinit var spinnerModel: Spinner
     private lateinit var spinnerLang: Spinner
     private lateinit var tvStatus: TextView
@@ -33,19 +34,28 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
 
     private val models = arrayOf("tiny", "base", "small", "medium")
+    private val engineKeys = arrayOf(SttEngines.WHISPER, SttEngines.MOONSHINE)
+    private val engineNames = arrayOf("Whisper (multilingual)", "Moonshine v2 (English, fast)")
     private val langs = arrayOf("auto", "en", "zh", "ja", "ko", "fr", "de", "es")
     private val langNames = arrayOf("Auto detect", "English", "Chinese", "Japanese", "Korean", "French", "German", "Spanish")
+
+    private fun currentEngine(): String =
+        getSharedPreferences("whisper", MODE_PRIVATE).getString("engine", SttEngines.WHISPER) ?: SttEngines.WHISPER
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
+        spinnerEngine = findViewById(R.id.spinnerEngine)
         spinnerModel = findViewById(R.id.spinnerModel)
         spinnerLang = findViewById(R.id.spinnerLang)
         tvStatus = findViewById(R.id.tvDownloadStatus)
         tvModelInfo = findViewById(R.id.tvModelInfo)
         progress = findViewById(R.id.progressModel)
 
+        val engineAdapter = ArrayAdapter(this, R.layout.spinner_item, engineNames)
+        engineAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
+        spinnerEngine.adapter = engineAdapter
         val modelAdapter = ArrayAdapter(this, R.layout.spinner_item, models)
         modelAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
         spinnerModel.adapter = modelAdapter
@@ -54,8 +64,10 @@ class SettingsActivity : AppCompatActivity() {
         spinnerLang.adapter = langAdapter
 
         val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
+        spinnerEngine.setSelection(engineKeys.indexOf(prefs.getString("engine", SttEngines.WHISPER)).coerceAtLeast(0))
         spinnerModel.setSelection(models.indexOf(prefs.getString("model", "small")).coerceAtLeast(0))
         spinnerLang.setSelection(langs.indexOf(prefs.getString("lang", "auto")).coerceAtLeast(0))
+        applyEngineLock()
 
         // Accuracy switches
         val swVad = findViewById<SwitchMaterial>(R.id.switchVad)
@@ -102,8 +114,9 @@ class SettingsActivity : AppCompatActivity() {
                 val mode = if (pos == 0) "auto" else threadOptions[pos]
                 prefs.edit().putString("threads_mode", mode).apply()
                 saved()
-                val n = WhisperEngine.applyThreadPref(this@SettingsActivity)
-                Toast.makeText(this@SettingsActivity, "Whisper will use $n threads", Toast.LENGTH_SHORT).show()
+                val n = if (currentEngine() == SttEngines.MOONSHINE) MoonshineEngine.applyThreadPref(this@SettingsActivity)
+                        else WhisperEngine.applyThreadPref(this@SettingsActivity)
+                Toast.makeText(this@SettingsActivity, "Engine will use $n threads", Toast.LENGTH_SHORT).show()
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
@@ -171,23 +184,44 @@ class SettingsActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(sb: SeekBar?) { saved() }
         })
 
+        spinnerEngine.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) {
+                val prev = prefs.getString("engine", SttEngines.WHISPER)
+                val e = engineKeys[pos.coerceIn(engineKeys.indices)]
+                prefs.edit().putString("engine", e).apply()
+                applyEngineLock()
+                refreshModelInfo()
+                if (e != prev) {
+                    val m = models[spinnerModel.selectedItemPosition.coerceAtLeast(0)]
+                    tvStatus.text = "Loading $e/$m model..."
+                    Toast.makeText(this@SettingsActivity, "Engine: $prev -> $e (keyboard badge updates)", Toast.LENGTH_SHORT).show()
+                    Thread {
+                        SttEngines.unloadIdle()
+                        val ok = SttEngines.ensureModel(this@SettingsActivity, e, m, SttEngines.jobLang(this@SettingsActivity))
+                        runOnUiThread { tvStatus.text = if (ok) localStatusText(e, m) else "$e/$m load failed - see Dashboard log" }
+                    }.start()
+                }
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+
         spinnerModel.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) {
                 val prev = prefs.getString("model", "small")
                 val m = models[pos]
+                val e = currentEngine()
                 prefs.edit().putString("model", m).apply()
                 refreshModelInfo()
                 if (m != prev) {
-                    tvStatus.text = "Loading $m model..."
+                    tvStatus.text = "Loading $e/$m model..."
                     Toast.makeText(this@SettingsActivity, "Switching model: $prev -> $m", Toast.LENGTH_SHORT).show()
                     Thread {
-                        val mf = ModelManager.modelFile(this@SettingsActivity, m)
-                        if (mf.exists() && mf.length() > 1_000_000) {
-                            val ok = WhisperEngine.ensureModel(mf.absolutePath)
-                            runOnUiThread { tvStatus.text = if (ok) localStatusText(m) else "Model $m load failed - see Dashboard log" }
+                        if (SttEngines.isReady(this@SettingsActivity, e, m)) {
+                            val ok = SttEngines.ensureModel(this@SettingsActivity, e, m, SttEngines.jobLang(this@SettingsActivity))
+                            runOnUiThread { tvStatus.text = if (ok) localStatusText(e, m) else "$e/$m load failed - see Dashboard log" }
                         } else {
-                            WhisperEngine.unloadIfIdle()
-                            runOnUiThread { tvStatus.text = localStatusText(m) }
+                            SttEngines.unloadIdle()
+                            runOnUiThread { tvStatus.text = localStatusText(e, m) }
                         }
                     }.start()
                 }
@@ -246,6 +280,28 @@ class SettingsActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(sb: SeekBar?) { saved() }
         })
 
+        // ---- Audio archive (full session audio saved next to transcript) ----
+        val swAudioMeeting = findViewById<SwitchMaterial>(R.id.switchSaveAudioMeeting)
+        val swAudioIme = findViewById<SwitchMaterial>(R.id.switchSaveAudioIme)
+        swAudioMeeting.isChecked = prefs.getBoolean("save_audio_meeting", true)
+        swAudioIme.isChecked = prefs.getBoolean("save_audio_ime", true)
+        swAudioMeeting.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("save_audio_meeting", b).apply(); saved() }
+        swAudioIme.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("save_audio_ime", b).apply(); saved() }
+
+        val audioFormats = arrayOf("M4A (small)", "WAV (lossless)")
+        val audioFormatKeys = arrayOf("m4a", "wav")
+        val audioAdapter = ArrayAdapter(this, R.layout.spinner_item, audioFormats)
+        audioAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
+        val spinnerAudio = findViewById<Spinner>(R.id.spinnerAudioFormat)
+        spinnerAudio.adapter = audioAdapter
+        spinnerAudio.setSelection(audioFormatKeys.indexOf(prefs.getString("audio_format", "m4a")).coerceAtLeast(0))
+        spinnerAudio.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) {
+                prefs.edit().putString("audio_format", audioFormatKeys[pos.coerceIn(audioFormatKeys.indices)]).apply(); saved()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+
         // ---- Buttons ----
         findViewById<Button>(R.id.btnSettingsDone).setOnClickListener { finish() }
 
@@ -254,20 +310,21 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnTestModel).setOnClickListener {
+            val e = currentEngine()
             val m = models[spinnerModel.selectedItemPosition.coerceAtLeast(0)]
-            val mf = ModelManager.modelFile(this, m)
-            if (!mf.exists() || mf.length() < 1_000_000) {
-                tvStatus.text = "TEST $m: not downloaded"
-                AppLog.e("ModelTest", "$m not downloaded")
+            if (!SttEngines.isReady(this, e, m)) {
+                tvStatus.text = "TEST $e/$m: not downloaded"
+                AppLog.e("ModelTest", "$e/$m not downloaded")
                 return@setOnClickListener
             }
-            tvStatus.text = "TEST: loading $m..."
-            AppLog.i("ModelTest", "start load test: $m")
+            tvStatus.text = "TEST: loading $e/$m..."
+            AppLog.i("ModelTest", "start load test: $e/$m")
             Thread {
                 val t0 = System.currentTimeMillis()
-                val ok = WhisperEngine.ensureModel(mf.absolutePath)
+                val ok = SttEngines.ensureModel(this@SettingsActivity, e, m, SttEngines.jobLang(this@SettingsActivity))
                 val ms = System.currentTimeMillis() - t0
-                val msg = if (ok) "TEST OK: $m loaded in ${ms}ms" else "TEST FAILED: $m (${WhisperEngine.lastError})"
+                val err = if (e == SttEngines.MOONSHINE) MoonshineEngine.lastError else WhisperEngine.lastError
+                val msg = if (ok) "TEST OK: $e/$m loaded in ${ms}ms" else "TEST FAILED: $e/$m ($err)"
                 AppLog.i("ModelTest", msg)
                 runOnUiThread {
                     tvStatus.text = msg
@@ -277,16 +334,13 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnClearModels).setOnClickListener {
-            val dir = ModelManager.modelsDir(this)
-            val files = dir.listFiles()
-            if (files.isNullOrEmpty()) {
+            val (n, freed) = ModelManager.clearAllModels(this)
+            if (n == 0) {
                 Toast.makeText(this, "No models to clear", Toast.LENGTH_SHORT).show()
                 refreshModelInfo()
             } else {
-                var freed = 0L
-                for (f in files) { freed += f.length(); f.delete() }
-                WhisperEngine.unloadIfIdle()
-                Toast.makeText(this, "Cleared ${files.size} model(s), freed ${freed / 1024 / 1024} MB", Toast.LENGTH_LONG).show()
+                SttEngines.unloadIdle()
+                Toast.makeText(this, "Cleared $n model(s), freed ${freed / 1024 / 1024} MB", Toast.LENGTH_LONG).show()
                 refreshModelInfo()
                 tvStatus.text = "Models cleared"
             }
@@ -295,50 +349,80 @@ class SettingsActivity : AppCompatActivity() {
 
         // preload status
         val lastModel = prefs.getString("model", "small") ?: "small"
-        tvStatus.text = localStatusText(lastModel)
+        val lastEngine = currentEngine()
+        tvStatus.text = localStatusText(lastEngine, lastModel)
         refreshModelInfo()
 
         lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    val mf = ModelManager.modelFile(applicationContext, lastModel)
-                    if (mf.exists() && mf.length() > 1_000_000 && !WhisperEngine.isLoaded(mf.absolutePath)) {
-                        WhisperEngine.ensureModel(mf.absolutePath)
+                    if (!SttEngines.isLoaded(applicationContext, lastEngine, lastModel) &&
+                        SttEngines.isReady(applicationContext, lastEngine, lastModel)) {
+                        SttEngines.ensureModel(applicationContext, lastEngine, lastModel, SttEngines.jobLang(applicationContext))
                     }
                 }
-                runOnUiThread { tvStatus.text = localStatusText(lastModel); refreshModelInfo() }
+                runOnUiThread { tvStatus.text = localStatusText(lastEngine, lastModel); refreshModelInfo() }
             } catch (_: Throwable) {}
         }
     }
 
-    private fun localStatusText(model: String): String = ModelManager.localStatus(this, model)
+    /** Moonshine is English-only: lock the language spinner to English. */
+    private fun applyEngineLock() {
+        val moon = currentEngine() == SttEngines.MOONSHINE
+        spinnerLang.isEnabled = !moon
+        spinnerLang.alpha = if (moon) 0.45f else 1f
+        if (moon) {
+            getSharedPreferences("whisper", MODE_PRIVATE).edit().putString("lang", "en").apply()
+            spinnerLang.setSelection(langs.indexOf("en").coerceAtLeast(0))
+        }
+    }
+
+    private fun localStatusText(engine: String, model: String): String =
+        if (engine == SttEngines.MOONSHINE) ModelManager.moonshineStatus(this, model)
+        else ModelManager.localStatus(this, model)
 
     private fun refreshModelInfo() {
+        val e = currentEngine()
         val sb = StringBuilder()
+        sb.appendLine(if (e == SttEngines.MOONSHINE) "Engine: Moonshine v2 (English only)" else "Engine: Whisper (multilingual)")
         for (m in models) {
-            val f = ModelManager.modelFile(this, m)
             val marker = if (m == spinnerModel.selectedItem.toString()) " > " else "   "
-            sb.appendLine(if (f.exists() && f.length() > 1_000_000) "$marker$m: ${f.length() / 1024 / 1024} MB [downloaded]" else "$marker$m: not downloaded")
+            val state = if (e == SttEngines.MOONSHINE) {
+                if (ModelManager.isMoonshineReady(this, m) || MoonshineEngine.isLoaded(m)) "$marker$m: ${ModelManager.moonshineSize(m)} [downloaded]"
+                else "$marker$m: not downloaded (${ModelManager.moonshineSize(m)})"
+            } else {
+                val f = ModelManager.modelFile(this, m)
+                if (f.exists() && f.length() > 1_000_000) "$marker$m: ${f.length() / 1024 / 1024} MB [downloaded]"
+                else "$marker$m: not downloaded (${ModelManager.whisperSize(m)})"
+            }
+            sb.appendLine(state)
         }
         tvModelInfo.text = sb.toString().trimEnd()
     }
 
     private fun downloadModel(model: String) {
+        val e = currentEngine()
         progress.visibility = ProgressBar.VISIBLE
-        tvStatus.text = "Downloading ggml-$model.bin ..."
+        tvStatus.text = if (e == SttEngines.MOONSHINE) "Downloading moonshine-$model ..." else "Downloading ggml-$model.bin ..."
         lifecycleScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    ModelManager.download(this@SettingsActivity, model) { p, msg ->
-                        runOnUiThread { progress.progress = p; tvStatus.text = msg }
+                    if (e == SttEngines.MOONSHINE) {
+                        ModelManager.downloadMoonshine(this@SettingsActivity, model) { p, msg ->
+                            runOnUiThread { progress.progress = p; tvStatus.text = msg }
+                        }
+                    } else {
+                        ModelManager.download(this@SettingsActivity, model) { p, msg ->
+                            runOnUiThread { progress.progress = p; tvStatus.text = msg }
+                        }
                     }
                 }
-                tvStatus.text = "Ready: ggml-$model.bin"
-                Toast.makeText(this@SettingsActivity, "Model $model ready", Toast.LENGTH_LONG).show()
+                tvStatus.text = if (e == SttEngines.MOONSHINE) "Ready: moonshine-$model" else "Ready: ggml-$model.bin"
+                Toast.makeText(this@SettingsActivity, "Model $e/$model ready", Toast.LENGTH_LONG).show()
                 refreshModelInfo()
-            } catch (e: Exception) {
-                tvStatus.text = "Failed: ${e.message}"
-                Toast.makeText(this@SettingsActivity, "Download failed: ${e.message}", Toast.LENGTH_LONG).show()
+            } catch (ex: Exception) {
+                tvStatus.text = "Failed: ${ex.message}"
+                Toast.makeText(this@SettingsActivity, "Download failed: ${ex.message}", Toast.LENGTH_LONG).show()
             } finally {
                 progress.visibility = ProgressBar.GONE
             }

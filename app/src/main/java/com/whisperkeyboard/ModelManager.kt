@@ -84,10 +84,76 @@ object ModelManager {
             conn.disconnect()
         }
 
-        // Verify file was written
+            // Verify file was written
         if (!outFile.exists() || outFile.length() < 1_000_000) {
             outFile.delete()
             throw RuntimeException("Download failed or file incomplete")
         }
+    }
+
+    // ---------- Moonshine v2 (.ort bundles, auto-downloaded by moonshine-voice) ----------
+
+    /** Human-readable sizes for Settings UI. */
+    fun whisperSize(model: String): String = when (model) {
+        "tiny" -> "~75 MB"; "base" -> "~142 MB"; "small" -> "~244 MB"; "medium" -> "~769 MB"; else -> ""
+    }
+
+    fun moonshineSize(model: String): String = when (model) {
+        "tiny" -> "~34 MB"; "base" -> "~60 MB"; "small" -> "~123 MB"; "medium" -> "~245 MB"; else -> ""
+    }
+
+    /** Marker file: real .ort bundles live in moonshine-voice ModelCache (app-private). */
+    fun moonshineMarker(ctx: Context, model: String): File {
+        return File(modelsDir(ctx), "moonshine-$model.marker")
+    }
+
+    fun isMoonshineReady(ctx: Context, model: String): Boolean {
+        if (moonshineMarker(ctx, model).exists()) return true
+        return try {
+            val cacheRoot = ai.moonshine.voice.ModelCache.defaultRoot(ctx)
+            cacheRoot.listFiles()?.any { it.name.contains(model, ignoreCase = true) } == true
+        } catch (_: Throwable) { false }
+    }
+
+    fun moonshineStatus(ctx: Context, model: String): String {
+        val arch = when (model) {
+            "tiny" -> "Tiny Streaming v2"; "base" -> "Base Streaming"
+            "small" -> "Small Streaming v2"; "medium" -> "Medium Streaming v2"; else -> model
+        }
+        return if (isMoonshineReady(ctx, model) || MoonshineEngine.isLoaded(model)) {
+            "Ready: $arch ${moonshineSize(model)} - cached on-device (English only)"
+        } else {
+            "Not downloaded - tap Download (WiFi recommended, ${moonshineSize(model)})"
+        }
+    }
+
+    /** Download = load via MoonshineEngine (fetches .ort bundles on first run). */
+    fun downloadMoonshine(ctx: Context, model: String, onProgress: (Int, String) -> Unit) {
+        if (isMoonshineReady(ctx, model) && MoonshineEngine.isLoaded(model)) {
+            onProgress(100, "Already downloaded: moonshine-$model")
+            return
+        }
+        onProgress(5, "Preparing $model (${moonshineSize(model)})...")
+        onProgress(15, "Downloading $model - first run may take a minute...")
+        val ok = MoonshineEngine.ensureModel(ctx, model, "en")
+        if (!ok) throw RuntimeException(MoonshineEngine.lastError.ifEmpty { "Model load failed" })
+        try {
+            moonshineMarker(ctx, model).writeText("moonshine-$model cached at ${System.currentTimeMillis()}")
+        } catch (_: Throwable) {}
+        onProgress(100, "Ready: moonshine-$model (${moonshineSize(model)})")
+    }
+
+    /** Delete whisper .bin files AND moonshine markers (the .ort cache itself is app-private). */
+    fun clearAllModels(ctx: Context): Pair<Int, Long> {
+        val dir = modelsDir(ctx)
+        val files = dir.listFiles() ?: emptyArray()
+        var freed = 0L
+        for (f in files) {
+            if (f.name.startsWith("ggml-") || f.name.startsWith("moonshine-")) {
+                freed += f.length()
+                f.delete()
+            }
+        }
+        return Pair(files.size, freed)
     }
 }

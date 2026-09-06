@@ -44,8 +44,10 @@ class WhisperKeyboardService : InputMethodService() {
     private val isRecording = AtomicBoolean(false)
     private var activeRecorder: AudioRecord? = null
     private var recordThread: Thread? = null
+    private var audioSaver: FullAudioSaver? = null
     private var rootView: View? = null
     private var tvStatus: TextView? = null
+    private var tvEngine: TextView? = null
     private var tvLabels: TextView? = null
     private var tvQueueBadge: TextView? = null
     private var tvPct: TextView? = null
@@ -103,18 +105,17 @@ class WhisperKeyboardService : InputMethodService() {
     private fun preloadModel(from: String) {
         Thread {
             try {
+                val eng = SttEngines.current(this)
                 val m = getModel()
-                val mf = ModelManager.modelFile(this, m)
-                if (!mf.exists() || mf.length() < 1_000_000) {
-                    handler.post { updateStatus("$m model not downloaded - open app to download") }
-                    AppLog.w(TAG, "preload($from): $m not downloaded")
+                if (!SttEngines.isReady(this, eng, m)) {
+                    handler.post { updateStatus("$eng/$m model not downloaded - open app to download") }
+                    AppLog.w(TAG, "preload($from): $eng/$m not downloaded")
                     return@Thread
                 }
-                if (!WhisperEngine.isLoaded(mf.absolutePath)) {
-                    handler.post { updateStatus("Loading $m model...") }
-                    WhisperEngine.applyThreadPref(this)
-                    val ok = WhisperEngine.ensureModel(mf.absolutePath)
-                    handler.post { updateStatus(if (ok) "$m ready - open app - the mic" else "Model load FAILED - see Dashboard log") }
+                if (!SttEngines.isLoaded(this, eng, m)) {
+                    handler.post { updateStatus("Loading $eng/$m model...") }
+                    val ok = SttEngines.ensureModel(this, eng, m, getLang())
+                    handler.post { updateStatus(if (ok) "$eng/$m ready - tap the mic" else "Model load FAILED - see Dashboard log") }
                 }
             } catch (e: Throwable) { AppLog.e(TAG, "preload error: ${e.message}") }
         }.apply { isDaemon = true; name = "model-preload-$from"; start() }
@@ -129,6 +130,7 @@ class WhisperKeyboardService : InputMethodService() {
         val view = layoutInflater.inflate(R.layout.keyboard_view, null)
         rootView = view
         tvStatus = view.findViewById(R.id.tvStatus)
+        tvEngine = view.findViewById(R.id.tvEngine)
         tvQueueBadge = view.findViewById(R.id.tvQueueBadge)
         tvPct = view.findViewById(R.id.tvProgressPct)
         progressBar = view.findViewById(R.id.progressTranscribe)
@@ -239,7 +241,7 @@ class WhisperKeyboardService : InputMethodService() {
             updateProcessingRow(); updateQueueBadge()
             // confirm once the native abort has actually landed
             fun confirmStop(attempt: Int) {
-                if (!TranscriptionQueue.isActive() && !WhisperEngine.isBusy()) {
+                if (!TranscriptionQueue.isActive() && !SttEngines.busy()) {
                     updateStatus("Processing stopped")
                     Toast.makeText(this, "Processing stopped", Toast.LENGTH_SHORT).show()
                     AppLog.i(TAG, "force stop confirmed")
@@ -295,6 +297,8 @@ class WhisperKeyboardService : InputMethodService() {
 
     private fun refreshAllButtons() {
         try { setCircleVisual(isRecording.get()) } catch (_: Exception) {}
+        // Yellow engine badge: read-only, engine changes ONLY in app Settings
+        try { tvEngine?.text = SttEngines.badgeText(this) } catch (_: Exception) {}
         updateLabelsRow()
     }
 
@@ -307,9 +311,10 @@ class WhisperKeyboardService : InputMethodService() {
         val mode = p.getString("threads_mode", "auto") ?: "auto"
         val thr = if (mode == "auto") (if (cores >= 8) 6 else if (cores >= 4) 4 else cores) else mode.toIntOrNull() ?: 4
         val chunkedKb = if (p.getBoolean("ime_chunked", true)) "chunked" else "whole"
+        val effLang = SttEngines.jobLang(this)
         val parts = mutableListOf(
             getModel(),
-            "lang:" + (langNames.getOrNull(langCodes.indexOf(getLang()).coerceAtLeast(0)) ?: getLang()),
+            "lang:" + (langNames.getOrNull(langCodes.indexOf(effLang).coerceAtLeast(0)) ?: effLang),
             "VAD ${"%.1f".format(chunkS)}s",
             if (isVadOn()) "auto-stop ${stopS}s" else "no auto-stop",
             if (isBtOn()) "BT mic" else null,
@@ -353,14 +358,14 @@ class WhisperKeyboardService : InputMethodService() {
             updateStatus("Need mic permission - open app"); return
         }
         val selModel = getModel()
-        val mf = ModelManager.modelFile(this, selModel)
-        if (!mf.exists() || mf.length() < 1_000_000) {
-            updateStatus("$selModel not downloaded - open app, tap Download Model")
-            Toast.makeText(this, "$selModel model missing - open the app to download it", Toast.LENGTH_LONG).show()
+        val selEngine = SttEngines.current(this)
+        if (!SttEngines.isReady(this, selEngine, selModel)) {
+            updateStatus("$selEngine/$selModel not downloaded - open app, tap Download Model")
+            Toast.makeText(this, "$selEngine/$selModel model missing - open the app to download it", Toast.LENGTH_LONG).show()
             return
         }
-        // model file present but not in memory -> start recording NOW, load concurrently
-        if (!WhisperEngine.isLoaded(mf.absolutePath)) preloadModel("startRecording")
+        // model ready but not in memory -> start recording NOW, load concurrently
+        if (!SttEngines.isLoaded(this, selEngine, selModel)) preloadModel("startRecording")
         isRecording.set(true)
         imeRecording = true
         startImeForeground()
@@ -369,6 +374,13 @@ class WhisperKeyboardService : InputMethodService() {
         tvPct?.text = "REC"
         stopHook = { stopRecordingAndTranscribe() }
         Toast.makeText(this, "Recording started", Toast.LENGTH_SHORT).show()
+
+        // Full-session audio archive (saved next to transcripts on stop)
+        FullAudioSaver.pruneTemp(this)
+        val sessionBase = "ime_${java.text.SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(java.util.Date())}"
+        audioSaver = if (prefs().getBoolean("save_audio_ime", true)) {
+            FullAudioSaver(this, FullAudioSaver.notesDir(), sessionBase)
+        } else null
 
         recordThread = Thread {
             val pcmChunk = ByteArrayOutputStream()
@@ -392,6 +404,7 @@ class WhisperKeyboardService : InputMethodService() {
                     val read = recorder.read(buffer, 0, buffer.size)
                     if (read > 0) {
                         synchronized(pcmChunk) { pcmChunk.write(buffer, 0, read) }
+                        audioSaver?.append(buffer, read)
                         val rms = AudioUtils.rms16(buffer, read)
                         val now = System.currentTimeMillis()
                         if (rms > VAD_THRESH) { hasVoice = true; lastVoiceTime = now; sessionVoiceTime = now }
@@ -411,7 +424,7 @@ class WhisperKeyboardService : InputMethodService() {
                                     (durMs >= CHUNK_HARD_CAP_MS)
                         }
                         if (closeChunk) {
-                            flushChunk(pcmChunk, selModel)
+                            flushChunk(pcmChunk, selEngine, selModel)
                             synchronized(pcmChunk) { pcmChunk.reset() }
                             chunkStartMs = now
                             hasVoice = false
@@ -434,7 +447,7 @@ class WhisperKeyboardService : InputMethodService() {
                 // shared recorder stays alive for bubble/next session (never release)
                 activeRecorder = null
                 // final partial chunk
-                flushChunk(pcmChunk, selModel)
+                flushChunk(pcmChunk, selEngine, selModel)
             } catch (e: Throwable) {
                 AppLog.e(TAG, "recording error: ${e.message}")
                 handler.post { updateStatus("Error: ${e.message}"); Toast.makeText(this@WhisperKeyboardService, "Mic error: ${e.message}", Toast.LENGTH_LONG).show() }
@@ -443,6 +456,21 @@ class WhisperKeyboardService : InputMethodService() {
             } finally {
                 imeRecording = false
                 stopHook = null
+                // Save full-session audio (already on a background thread).
+                // Tail bytes were streamed live, so nothing extra to append.
+                try {
+                    val saver = audioSaver
+                    audioSaver = null
+                    if (saver != null) {
+                        val format = prefs().getString("audio_format", "m4a") ?: "m4a"
+                        val f = saver.finish(format)
+                        if (f != null) handler.post {
+                            Toast.makeText(this@WhisperKeyboardService, "Audio saved: ${f.name}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    AppLog.w(TAG, "audio save failed: ${e.message}")
+                }
                 handler.post {
                     resetMicButton()
                     val done = !TranscriptionQueue.isActive() && TextRouter.pendingTypingCount() == 0
@@ -455,7 +483,7 @@ class WhisperKeyboardService : InputMethodService() {
     }
 
     /** Write chunk to WAV and enqueue for transcription immediately (pipeline). */
-    private fun flushChunk(buf: ByteArrayOutputStream, model: String) {
+    private fun flushChunk(buf: ByteArrayOutputStream, engine: String, model: String) {
         val bytes = synchronized(buf) { buf.toByteArray() }
         if (bytes.size <= 1800) return
         val ts = System.currentTimeMillis()
@@ -464,9 +492,9 @@ class WhisperKeyboardService : InputMethodService() {
         val wav = File(cacheDir, "ime_chunk_$ts.wav")
         AudioUtils.pcmToWav(pcm, wav)
         pcm.delete()
-        val lang = getLang()
+        val lang = SttEngines.jobLang(this)
         val sec = bytes.size / 32000.0
-        AppLog.i(TAG, "enqueue chunk %.1fs (%d KB)".format(sec, bytes.size / 1024))
+        AppLog.i(TAG, "enqueue chunk $engine/$model %.1fs (%d KB)".format(sec, bytes.size / 1024))
         handler.post { Toast.makeText(this@WhisperKeyboardService, "Chunk %.0fs queued".format(sec), Toast.LENGTH_SHORT).show() }
         TranscriptionQueue.enqueue(
             TranscriptionQueue.Job(
@@ -474,6 +502,7 @@ class WhisperKeyboardService : InputMethodService() {
                 wavFile = wav,
                 model = model,
                 lang = lang,
+                engine = engine,
                 onResult = { text -> TextRouter.route(text.trim()) },
                 onError = { err ->
                     handler.post {
@@ -549,10 +578,60 @@ class WhisperKeyboardService : InputMethodService() {
         activeIC = currentInputConnection
         preloadModel("onStartInputView")
         refreshAllButtons()
+        // 2-min rule: unclaimed transcripts older than EXPIRY_MS are dropped, never typed stale
+        val expired = OutstandingStore.clearIfExpired(this)
+        if (expired > 0) {
+            Toast.makeText(this, "Cleared $expired expired pending transcript(s)", Toast.LENGTH_SHORT).show()
+        }
         updateOutstandingRow()
         progressBar?.progress = TranscriptionQueue.progress()
         tvPct?.text = if (isRecording.get()) "REC" else "${TranscriptionQueue.progress()}%"
         updateQueueBadge()
+
+        val hasPending = TranscriptionQueue.isActive() ||
+                TextRouter.pendingTypingCount() > 0 ||
+                OutstandingStore.count(this) > 0
+        if (hasPending) {
+            // Returned while work was in flight (or parked): type it in, do NOT auto-record.
+            val typed = autoTypePending()
+            if (TranscriptionQueue.isActive() || TextRouter.pendingTypingCount() > 0) {
+                updateStatus("Processing... text will type in automatically")
+            } else if (typed > 0) {
+                updateStatus("Typed $typed pending transcript(s) ✓")
+            }
+        } else if (!restarting && !isRecording.get()) {
+            // Fresh switch to Whisper with nothing pending: start recording immediately.
+            startRecording()
+        }
+    }
+
+    /**
+     * Type every parked outstanding transcript into the current field, oldest
+     * first. Returns how many were inserted. No auto-recording follows this.
+     */
+    private fun autoTypePending(): Int {
+        val ic = currentInputConnection ?: activeIC ?: return 0
+        var n = 0
+        while (true) {
+            val t = OutstandingStore.popOldest(this) ?: break
+            if (t.isBlank()) continue
+            try {
+                val capped = capsFn?.invoke(t) ?: t
+                ic.commitText("$capped ", 1)
+                n++
+            } catch (_: Exception) {
+                // field rejected it - park it back and stop
+                OutstandingStore.add(this, t)
+                break
+            }
+        }
+        if (n > 0) {
+            val left = OutstandingStore.count(this)
+            Toast.makeText(this, if (left > 0) "Typed $n - $left more pending" else "Typed $n pending ✓", Toast.LENGTH_SHORT).show()
+            AppLog.i(TAG, "auto-typed $n pending on return")
+            updateOutstandingRow()
+        }
+        return n
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
