@@ -45,7 +45,6 @@ class MeetingRecordService : Service() {
     private var model = "small"
     private var lang = "auto"
     private var engine = SttEngines.WHISPER
-    private var mode = "txt"  // "txt" = save clean text file, "type" = commit to focused input
     private var transcriptFile: File? = null
     private var segmentCounter = 0
     private val allText = StringBuilder()
@@ -67,7 +66,6 @@ class MeetingRecordService : Service() {
                 if (isRunning) return START_STICKY // already recording - ignore double tap
                 model = intent.getStringExtra("model") ?: "small"
                 lang = intent.getStringExtra("lang") ?: "auto"
-                mode = intent.getStringExtra("mode") ?: "txt"
                 engine = intent.getStringExtra("engine") ?: SttEngines.WHISPER
                 startMeeting()
             }
@@ -124,7 +122,7 @@ class MeetingRecordService : Service() {
         isStopping = false
         transcriptFile = null
         savedAudioFile = null
-        uiStatus = "Recording ($mode mode)... tap Stop (continues with screen off)"
+        uiStatus = "Recording... tap Stop (continues with screen off)"
         startTimeMs = System.currentTimeMillis()
         segmentCounter = 0
         allText.clear()
@@ -133,18 +131,17 @@ class MeetingRecordService : Service() {
         val baseName = "meeting_${fmt.format(Date())}"
         audioBaseName = baseName
 
-        if (mode == "txt") {
-            val docsDir = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-                "WhisperNotes"
-            )
-            if (!docsDir.exists()) docsDir.mkdirs()
+        // Meeting always saves a clean words-only transcript + full audio.
+        val docsDir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+            "WhisperNotes"
+        )
+        if (!docsDir.exists()) docsDir.mkdirs()
 
-            transcriptFile = File(docsDir, "$baseName.txt")
-            transcriptFile?.writeText("")
-        }
+        transcriptFile = File(docsDir, "$baseName.txt")
+        transcriptFile?.writeText("")
 
-        // Full-session audio archive (independent of txt/type mode)
+        // Full-session audio archive alongside the transcript
         FullAudioSaver.pruneTemp(this)
         audioSaver = if (getSharedPreferences("whisper", MODE_PRIVATE).getBoolean("save_audio_meeting", true)) {
             FullAudioSaver(this, FullAudioSaver.notesDir(), baseName)
@@ -171,7 +168,7 @@ class MeetingRecordService : Service() {
             runCatching { stopSelf() }
             return
         }
-        Log.i(TAG, "Meeting started: mode=$mode model=$model lang=$lang engine=$engine - WakeLock held, will survive lock screen")
+        Log.i(TAG, "Meeting started: model=$model lang=$lang engine=$engine - WakeLock held, will survive lock screen")
 
         recordThread = Thread {
             try {
@@ -254,7 +251,7 @@ class MeetingRecordService : Service() {
                             synchronized(this) {
                                 allText.append(text).append(" ")
 
-                                if (mode == "txt" && transcriptFile != null) {
+                                if (transcriptFile != null) {
                                     // Save clean text only (no timestamps)
                                     transcriptFile!!.appendText("$text\n")
                                     getSharedPreferences("whisper", MODE_PRIVATE)

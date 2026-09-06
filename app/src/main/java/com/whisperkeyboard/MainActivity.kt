@@ -9,7 +9,6 @@ import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.ProgressBar
-import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -26,7 +25,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvMeetingPath: TextView
     private lateinit var tvQueue: TextView
     private lateinit var progressTranscribe: ProgressBar
-    private lateinit var radioMode: RadioGroup
     private lateinit var btnStartMeeting: Button
     private lateinit var btnStopMeeting: Button
 
@@ -68,7 +66,6 @@ class MainActivity : AppCompatActivity() {
         tvMeetingPath = findViewById(R.id.tvMeetingPath)
         tvQueue = findViewById(R.id.tvQueue)
         progressTranscribe = findViewById(R.id.progressTranscribe)
-        radioMode = findViewById(R.id.radioMode)
         btnStartMeeting = findViewById(R.id.btnStartMeeting)
         btnStopMeeting = findViewById(R.id.btnStopMeeting)
 
@@ -94,16 +91,14 @@ class MainActivity : AppCompatActivity() {
             val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
             val lang = SttEngines.jobLang(this)
             val model = prefs.getString("model", "small") ?: "small"
-            val mode = if (radioMode.checkedRadioButtonId == R.id.radioType) "type" else "txt"
             val intent = Intent(this, MeetingRecordService::class.java)
             intent.action = "START"
             intent.putExtra("model", model)
             intent.putExtra("lang", lang)
             intent.putExtra("engine", SttEngines.current(this))
-            intent.putExtra("mode", mode)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
-            tvMeetingStatus.text = "Recording ($mode mode)... tap Stop (continues with screen off)"
-            Toast.makeText(this, "Meeting recording started ($mode)", Toast.LENGTH_SHORT).show()
+            tvMeetingStatus.text = "Recording... tap Stop (continues with screen off)"
+            Toast.makeText(this, "Meeting recording started", Toast.LENGTH_SHORT).show()
             refreshMeetingButtons()
         }
 

@@ -28,6 +28,9 @@
 
 ## Changelog
 
+### v2.7.5 (2026-09-06) — Fixed roles: meeting saves TXT, keyboard types
+- Removed the dead "Type into focus" meeting option (it silently discarded transcripts). Meeting always saves TXT + audio; the keyboard always types into the focused field. No mode to pick anywhere.
+
 ### v2.7.4 (2026-09-06) — Queue counter crash fixed (found by on-device test)
 - **Crash:** a progress tick landing just after the queue drained called `coerceIn(1, 0)` → killed the whole app mid-meeting-finalize. Counters now return `0/0` when idle. Caught via adb-driven meeting test, not user report.
 
