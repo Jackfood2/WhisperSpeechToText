@@ -38,6 +38,10 @@ class SettingsActivity : AppCompatActivity() {
     private val modelKeys = arrayOf("", "tiny", "base", "small", "medium")
     private val modelNames = arrayOf("Select model…", "tiny", "base", "small", "medium")
     private lateinit var modelAdapter: ArrayAdapter<String>
+    /** Guards against double-tap/rotation launching two writers into one model file. */
+    companion object {
+        @Volatile private var downloading: String? = null
+    }
     private val engineKeys = arrayOf(SttEngines.WHISPER, SttEngines.MOONSHINE)
     private val engineNames = arrayOf("Whisper (multilingual)", "Moonshine v2 (English, fast)")
     private val langs = arrayOf("auto", "en", "zh", "ja", "ko", "fr", "de", "es")
@@ -485,7 +489,18 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun downloadModel(model: String) {
         val e = currentEngine()
+        // Single-writer guard (also survives rotation): two concurrent downloads
+        // interleaving into one file produce size-plausible garbage.
+        val key = "$e/$model"
+        if (downloading != null) {
+            Toast.makeText(this, "Already downloading $downloading - wait for it to finish", Toast.LENGTH_SHORT).show()
+            return
+        }
+        downloading = key
+        val btnDl = findViewById<Button>(R.id.btnDownloadModel)
+        btnDl.isEnabled = false
         progress.visibility = ProgressBar.VISIBLE
+        progress.progress = 0
         tvStatus.text = if (e == SttEngines.MOONSHINE) "Downloading moonshine-$model ..." else "Downloading ggml-$model.bin ..."
         lifecycleScope.launch {
             try {
@@ -505,10 +520,14 @@ class SettingsActivity : AppCompatActivity() {
                 modelAdapter.notifyDataSetChanged()
                 refreshModelInfo()
             } catch (ex: Exception) {
+                // Cancellation (e.g. rotation) or network failure: the partial file
+                // stays INCOMPLETE-flagged and re-downloads cleanly next time.
                 tvStatus.text = "Failed: ${ex.message}"
                 Toast.makeText(this@SettingsActivity, "Download failed: ${ex.message}", Toast.LENGTH_LONG).show()
             } finally {
+                if (downloading == key) downloading = null
                 progress.visibility = ProgressBar.GONE
+                runCatching { btnDl.isEnabled = true }
             }
         }
     }

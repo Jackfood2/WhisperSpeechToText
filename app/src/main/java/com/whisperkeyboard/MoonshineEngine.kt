@@ -113,9 +113,12 @@ object MoonshineEngine {
         if (fastHit) return true
         cancelRequested.set(0) // new load generation
         AppLog.i(TAG, "ensureModel $model arch=$arch lang=$langCode")
+        // Never hold an Activity: Settings/Main pass their own context, and the
+        // installed transcriber would leak it for the model's whole lifetime.
+        val appCtx = context.applicationContext
         var mic: MicTranscriber? = null
         try {
-            mic = MicTranscriber(context).language(langCode).modelArch(arch)
+            mic = MicTranscriber(appCtx).language(langCode).modelArch(arch)
             mic.onProgress { fraction, file ->
                 AppLog.i(TAG, "downloading $file ${(fraction*100).toInt()}%")
             }

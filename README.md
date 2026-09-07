@@ -28,6 +28,10 @@
 
 ## Changelog
 
+### v2.7.10 (2026-09-06) — Stability: download guard + context leak
+- **Corrupt-model guard:** double-tapping Download (or rotating mid-download) launched two writers into one file — size-plausible garbage. Single-writer lock + disabled button until done.
+- **Activity leak:** the Moonshine transcriber held the launching Activity for its whole lifetime; now pinned to app context.
+
 ### v2.7.9 (2026-09-06) — Keyboard types straight, no audio kept
 - Keyboard and bubble recording no longer save an audio copy — speech is transcribed and typed straight into the field. Full audio archiving stays for meeting recordings only (toggle + format in Settings).
 
