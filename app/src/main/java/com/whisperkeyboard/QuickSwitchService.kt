@@ -62,7 +62,6 @@ class QuickSwitchService : Service() {
     @Volatile private var state = STATE_IDLE
     private var recThread: Thread? = null
     @Volatile private var activeBubbleRecorder: AudioRecord? = null
-    private var audioSaver: FullAudioSaver? = null
     @Volatile private var sessionHadVoice = false
     @Volatile var chunksSent = 0
     @Volatile private var recStartTs = 0L
@@ -274,12 +273,8 @@ class QuickSwitchService : Service() {
         recActive = true
         setState(STATE_REC, null)
         toast("Recording started - tap to stop")
-        // Full-session audio archive (saved next to transcripts on stop)
-        FullAudioSaver.pruneTemp(this)
-        val bubbleBase = "bubble_${java.text.SimpleDateFormat("yyyy-MM-dd_HHmmss", java.util.Locale.US).format(java.util.Date())}"
-        audioSaver = if (prefs.getBoolean("save_audio_ime", true)) {
-            FullAudioSaver(this, FullAudioSaver.notesDir(), bubbleBase)
-        } else null
+        // NOTE: bubble sessions type straight via TextRouter - no audio file is kept
+        // (meeting recordings still archive audio next to the TXT).
         refreshNotif(true) // notification must reflect REC immediately (timer starts from here)
         AppLog.i("Bubble", "recording started")
         // keep CPU alive while locked so recording never stalls
@@ -379,7 +374,6 @@ class QuickSwitchService : Service() {
                     val voiced = rms > 0.008 // bubble: lenient gate; transcription decides speech vs noise
                     // always buffer - preserves the very start of speech (prevents front cut)
                     synchronized(pcmChunk) { pcmChunk.write(buf, 0, n) }
-                    audioSaver?.append(buf, n)
                     if (voiced) { gotVoice = true; sessionHadVoice = true; chunkHadVoice = true; lastVoiceTime = now }
                     if (gotVoice) {
                         val silenceFor = now - lastVoiceTime
@@ -425,18 +419,6 @@ class QuickSwitchService : Service() {
                 // CRITICAL: clear this even on natural/mic-failure exit - if it stays true,
                 // every future tap hits the startRec guard and the bubble is dead until reboot
                 recActive = false
-                // Save full-session audio (already on the background rec thread)
-                try {
-                    val saver = audioSaver
-                    audioSaver = null
-                    if (saver != null) {
-                        val format = getSharedPreferences("whisper", MODE_PRIVATE).getString("audio_format", "m4a") ?: "m4a"
-                        val f = saver.finish(format)
-                        if (f != null) handler.post { toast("Audio saved: ${f.name}") }
-                    }
-                } catch (e: Exception) {
-                    AppLog.w("Bubble", "audio save failed: ${e.message}")
-                }
                 // STOP but never RELEASE the shared recorder: releasing+recreating within
                 // seconds yields an all-zero stream on Samsung HALs; the keyboard reuses
                 // the same healthy instance via AudioUtils.createRecorder()

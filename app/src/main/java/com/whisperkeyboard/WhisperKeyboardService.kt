@@ -44,7 +44,6 @@ class WhisperKeyboardService : InputMethodService() {
     private val isRecording = AtomicBoolean(false)
     private var activeRecorder: AudioRecord? = null
     private var recordThread: Thread? = null
-    private var audioSaver: FullAudioSaver? = null
     private var rootView: View? = null
     private var tvStatus: TextView? = null
     private var tvEngine: TextView? = null
@@ -385,13 +384,8 @@ class WhisperKeyboardService : InputMethodService() {
         stopHook = { stopRecordingAndTranscribe() }
         Toast.makeText(this, "Recording started", Toast.LENGTH_SHORT).show()
 
-        // Full-session audio archive (saved next to transcripts on stop)
-        FullAudioSaver.pruneTemp(this)
-        val sessionBase = "ime_${java.text.SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(java.util.Date())}"
-        audioSaver = if (prefs().getBoolean("save_audio_ime", true)) {
-            FullAudioSaver(this, FullAudioSaver.notesDir(), sessionBase)
-        } else null
-
+        // NOTE: keyboard sessions type straight into the field - no audio file
+        // is kept (meeting recordings still archive audio next to the TXT).
         recordThread = Thread {
             val pcmChunk = ByteArrayOutputStream()
             var hasVoice = false
@@ -414,7 +408,6 @@ class WhisperKeyboardService : InputMethodService() {
                     val read = recorder.read(buffer, 0, buffer.size)
                     if (read > 0) {
                         synchronized(pcmChunk) { pcmChunk.write(buffer, 0, read) }
-                        audioSaver?.append(buffer, read)
                         val rms = AudioUtils.rms16(buffer, read)
                         val now = System.currentTimeMillis()
                         if (rms > VAD_THRESH) { hasVoice = true; lastVoiceTime = now; sessionVoiceTime = now }
@@ -466,21 +459,6 @@ class WhisperKeyboardService : InputMethodService() {
             } finally {
                 imeRecording = false
                 stopHook = null
-                // Save full-session audio (already on a background thread).
-                // Tail bytes were streamed live, so nothing extra to append.
-                try {
-                    val saver = audioSaver
-                    audioSaver = null
-                    if (saver != null) {
-                        val format = prefs().getString("audio_format", "m4a") ?: "m4a"
-                        val f = saver.finish(format)
-                        if (f != null) handler.post {
-                            Toast.makeText(this@WhisperKeyboardService, "Audio saved: ${f.name}", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                } catch (e: Exception) {
-                    AppLog.w(TAG, "audio save failed: ${e.message}")
-                }
                 handler.post {
                     resetMicButton()
                     val done = !TranscriptionQueue.isActive() && TextRouter.pendingTypingCount() == 0

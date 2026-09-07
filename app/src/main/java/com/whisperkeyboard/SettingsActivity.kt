@@ -353,13 +353,10 @@ class SettingsActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(sb: SeekBar?) { saved() }
         })
 
-        // ---- Audio archive (full session audio saved next to transcript) ----
+        // ---- Audio archive (meeting only; keyboard/bubble type straight, no audio kept) ----
         val swAudioMeeting = findViewById<SwitchMaterial>(R.id.switchSaveAudioMeeting)
-        val swAudioIme = findViewById<SwitchMaterial>(R.id.switchSaveAudioIme)
         swAudioMeeting.isChecked = prefs.getBoolean("save_audio_meeting", true)
-        swAudioIme.isChecked = prefs.getBoolean("save_audio_ime", true)
         swAudioMeeting.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("save_audio_meeting", b).apply(); saved() }
-        swAudioIme.setOnCheckedChangeListener { _, b -> prefs.edit().putBoolean("save_audio_ime", b).apply(); saved() }
 
         val audioFormats = arrayOf("M4A (small)", "WAV (lossless)")
         val audioFormatKeys = arrayOf("m4a", "wav")

@@ -28,6 +28,9 @@
 
 ## Changelog
 
+### v2.7.9 (2026-09-06) — Keyboard types straight, no audio kept
+- Keyboard and bubble recording no longer save an audio copy — speech is transcribed and typed straight into the field. Full audio archiving stays for meeting recordings only (toggle + format in Settings).
+
 ### v2.7.8 (2026-09-06) — Reliability audit pass
 - Full review of the new picker/preflight/retry/clear paths for races: no toast-spam when no model is picked, spinner listeners verified fire-free on launch, retry re-resolves the current engine without losing jobs.
 
