@@ -108,6 +108,8 @@ object SttEngines {
     fun unloadIdle() {
         try { WhisperEngine.unloadIfIdle() } catch (_: Exception) {}
         try { MoonshineEngine.unloadIfIdle() } catch (_: Exception) {}
+        // Model session ended: next normal -> Speech switch auto-records again.
+        try { KeyboardAutoStart.reset() } catch (_: Exception) {}
     }
 
     fun loadedModel(): String? =

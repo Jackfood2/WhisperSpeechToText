@@ -40,10 +40,10 @@ class QuickSwitchService : Service() {
         const val CHANNEL = "quick_switch"
         const val NOTIF_ID = 42
         const val WHISPER_IME = "com.whisperkeyboard/.WhisperKeyboardService"
-        const val CHUNK_SILENCE_MS = 4000L
-        const val CHUNK_TARGET_MS = 30_000L
-        const val CHUNK_HARD_CAP_MS = 45_000L
-        const val MIN_CHUNK_BYTES = 16000      // >=0.5s of audio before a chunk may close
+        const val CHUNK_SILENCE_MS = 2_000L
+        const val CHUNK_MIN_MS = 30_000L
+        const val CHUNK_MAX_MS = 60_000L
+        const val MIN_CHUNK_BYTES = 16000
         const val STATE_IDLE = 0
         const val STATE_REC = 1
         const val STATE_PROC = 2
@@ -260,6 +260,25 @@ class QuickSwitchService : Service() {
             toast((SttEngines.describeMissing(this, engine, model) ?: "not downloaded") + " - open the app")
             return
         }
+        if (!MicSessionManager.tryAcquire(MicOwner.BUBBLE)) {
+            toast("Microphone is busy")
+            return
+        }
+        try {
+            startRecAfterAcquire(prefs, engine, model)
+        } catch (e: Exception) {
+            MicSessionManager.release(MicOwner.BUBBLE)
+            AppLog.e("Bubble", "recording setup failed: ${e.message}")
+            toast("Recording failed to start")
+        }
+    }
+
+    /** Remainder of startRec() — runs only while this session owns the mic. */
+    private fun startRecAfterAcquire(
+        prefs: android.content.SharedPreferences,
+        engine: String,
+        model: String
+    ) {
         ensureWhisperActive() // best effort so delivery can type directly
         // start recording NOW; load the model concurrently (first chunk waits in queue)
         if (!SttEngines.isLoaded(this, engine, model)) {
@@ -292,13 +311,9 @@ class QuickSwitchService : Service() {
         recThread = Thread {
             var lastVoiceTime = System.currentTimeMillis()
             var chunkStartMs = lastVoiceTime
-            val recStartMs = lastVoiceTime
             var gotVoice = false
             var chunkHadVoice = false // voice arrived since the last flush - guards against pause-silence chunks
             val chunked = prefs.getBoolean("bubble_chunked", true)
-            // unified timing with the keyboard interface (Settings page)
-            val chunkSilenceMs = prefs.getInt("vad_chunk_silence_ds", 40).coerceIn(5, 100) * 100L
-            val chunkTargetMs = prefs.getInt("chunk_target_s", 30).coerceIn(1, 45) * 1000L
             try {
                 prevThread?.join(1200) // old session flushes & exits first (deterministic handoff)
 
@@ -378,24 +393,38 @@ class QuickSwitchService : Service() {
                     if (gotVoice) {
                         val silenceFor = now - lastVoiceTime
                         val durMs = now - chunkStartMs
-                        val hasContent = pcmChunk.size() >= MIN_CHUNK_BYTES // >=0.5s of audio
-                        val inFirstWindow = now - recStartMs < 15_000
-                        val queueBusy = TranscriptionQueue.isActive()
-                        val closeChunk = when {
-                            !hasContent -> false
-                            !chunked -> durMs >= 900_000L // whole-audio mode: single piece (15-min safety split)
-                            inFirstWindow -> (durMs >= 15_000 && silenceFor >= WhisperKeyboardService.CHUNK_PAUSE_MS) || silenceFor >= 3_000
-                            else -> (durMs >= chunkTargetMs && !queueBusy) ||
-                                    silenceFor >= chunkSilenceMs ||
-                                    durMs >= CHUNK_HARD_CAP_MS
-                        }
+
+                        val hasContent =
+                            pcmChunk.size() >= MIN_CHUNK_BYTES
+
+                        val closeChunk =
+                            when {
+                                !hasContent -> false
+
+                                !chunked ->
+                                    durMs >= 900_000L
+
+                                durMs >= CHUNK_MAX_MS ->
+                                    true
+
+                                durMs >= CHUNK_MIN_MS &&
+                                    silenceFor >= CHUNK_SILENCE_MS ->
+                                    true
+
+                                else ->
+                                    false
+                            }
+
                         if (closeChunk) {
                             // only flush chunks that contain NEW voice - a long pause must not
                             // produce an endless series of silence-only chunks after each flush
                             if (chunkHadVoice) {
                                 if (flushChunk(pcmChunk, engine, model, lang)) chunksSent++
                             } else {
-                                AppLog.i("Bubble", "pause-silence skipped (${pcmChunk.size()}B)")
+                                AppLog.i(
+                                    "Bubble",
+                                    "Silence-only chunk skipped"
+                                )
                             }
                             synchronized(pcmChunk) { pcmChunk.reset() }
                             chunkStartMs = now
@@ -419,6 +448,7 @@ class QuickSwitchService : Service() {
                 // CRITICAL: clear this even on natural/mic-failure exit - if it stays true,
                 // every future tap hits the startRec guard and the bubble is dead until reboot
                 recActive = false
+                MicSessionManager.release(MicOwner.BUBBLE)
                 // STOP but never RELEASE the shared recorder: releasing+recreating within
                 // seconds yields an all-zero stream on Samsung HALs; the keyboard reuses
                 // the same healthy instance via AudioUtils.createRecorder()
@@ -453,11 +483,28 @@ class QuickSwitchService : Service() {
     }
 
     /** Yellow until every chunk is transcribed AND delivered (typed or parked). */
-    private fun watchCompletion(gen: Int, attempt: Int = 0) {
-        if (state != STATE_PROC) return // a new recording took over
-        val busy = TranscriptionQueue.isActive() || TextRouter.pendingTypingCount() > 0 || finalFlushPending
+    private fun watchCompletion(
+        gen: Int,
+        attempt: Int = 0
+    ) {
+        if (gen != sessionGen) return
+        if (state != STATE_PROC) return
+
+        val busy =
+            !TranscriptionQueue.isCompletelyIdle() ||
+            TextRouter.pendingTypingCount() > 0 ||
+            finalFlushPending
+
         if (busy) {
-            handler.postDelayed({ watchCompletion(gen, attempt + 1) }, 500)
+            handler.postDelayed(
+                {
+                    watchCompletion(
+                        gen,
+                        attempt + 1
+                    )
+                },
+                500L
+            )
         } else {
             setState(STATE_IDLE, "Done - transcript delivered or held for later")
             refreshNotif(true) // back to the idle hint text - never frozen on "Recording Xs"
@@ -488,29 +535,31 @@ class QuickSwitchService : Service() {
         val wav = File(cacheDir, "bubble_${ts}_$fnameCounter.wav")
         AudioUtils.pcmToWav(pcm, wav)
         pcm.delete()
-        TranscriptionQueue.enqueue(
-            TranscriptionQueue.Job(
-                context = applicationContext,
-                wavFile = wav,
-                model = model,
-                lang = lang,
-                engine = engine,
-                onResult = { text ->
-                    val raw = text.trim()
-                    handler.post {
-                        if (raw.isEmpty() || raw.startsWith("ERROR") || AudioUtils.isNoSpeechText(raw)) {
-                            toast(if (raw.startsWith("ERROR")) "Chunk failed" else "No speech in chunk")
-                        } else {
-                            TextRouter.route(raw)
-                        }
+        val job = TranscriptionQueue.Job(
+            context = applicationContext,
+            wavFile = wav,
+            model = model,
+            lang = lang,
+            engine = engine,
+            onResult = { text ->
+                val raw = text.trim()
+                handler.post {
+                    if (raw.isEmpty() || raw.startsWith("ERROR") || AudioUtils.isNoSpeechText(raw)) {
+                        toast(if (raw.startsWith("ERROR")) "Chunk failed" else "No speech in chunk")
+                    } else {
+                        TextRouter.route(raw)
                     }
-                },
-                onError = { err ->
-                    handler.post { toast("Transcription failed - Retry Failed in app") }
-                    AppLog.e("Bubble", "chunk failed: $err")
                 }
-            )
+            },
+            onError = { err ->
+                handler.post { toast("Transcription failed - Retry Failed in app") }
+                AppLog.e("Bubble", "chunk failed: $err")
+            }
         )
+        if (!TranscriptionQueue.enqueue(job)) {
+            AppLog.e("Bubble", "Unable to enqueue transcription chunk")
+            return false
+        }
         ProcessingService.notifyActivity()
         return true
     }
@@ -539,7 +588,20 @@ class QuickSwitchService : Service() {
         try {
             val current = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) ?: ""
             val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
-            val goingWhisper = !current.equals(WHISPER_IME, ignoreCase = true)
+            val goingWhisper =
+                !current.equals(WHISPER_IME, ignoreCase = true)
+
+            if (goingWhisper) {
+                // Request one automatic recording for the current model
+                // session. Actual recording starts when the IME view appears.
+                KeyboardAutoStart.requestFirstEntryAutoStart()
+
+                AppLog.i(
+                    "Bubble",
+                    "Normal keyboard -> Speech: auto-start requested"
+                )
+            }
+
             val target = if (goingWhisper) {
                 prefs.edit().putString("prev_ime", current).apply()
                 WHISPER_IME
@@ -563,6 +625,7 @@ class QuickSwitchService : Service() {
 
     override fun onDestroy() {
         recActive = false
+        MicSessionManager.release(MicOwner.BUBBLE)
         handler.removeCallbacksAndMessages(null)
         // stop only - the shared mic stays healthy for the keyboard service
         try { activeBubbleRecorder?.stop() } catch (_: Exception) {}

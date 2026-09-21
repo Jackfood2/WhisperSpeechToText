@@ -17,11 +17,14 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.widget.NestedScrollView
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.RandomAccessFile
 
 class MainActivity : AppCompatActivity() {
 
@@ -31,6 +34,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progressTranscribe: ProgressBar
     private lateinit var btnStartMeeting: Button
     private lateinit var btnStopMeeting: Button
+    private lateinit var tvLiveTranscript: TextView
+    private lateinit var transcriptScrollView: NestedScrollView
+
+    private var previewPath: String? = null
+    private var shownTranscriptBytes = 0L
+    private var pendingPartialBytes = ByteArray(0)
+    private val previewText =
+        android.text.SpannableStringBuilder()
 
     /**
      * Start and Stop are mutually exclusive: exactly one is enabled at any
@@ -94,6 +105,8 @@ class MainActivity : AppCompatActivity() {
                 getSharedPreferences("whisper", MODE_PRIVATE).edit()
                     .remove("last_transcript_path").remove("last_audio_path").apply()
                 tvMeetingPath.text = ""
+                previewPath = null
+                resetPreview()
                 Toast.makeText(this, "Deleted $n file(s)", Toast.LENGTH_SHORT).show()
                 AppLog.i("Main", "cleared $n recording files")
             }
@@ -119,12 +132,165 @@ class MainActivity : AppCompatActivity() {
             } else "$pct%"
     }
 
+    private fun resetPreview() {
+        previewText.clear()
+        pendingPartialBytes = ByteArray(0)
+        shownTranscriptBytes = 0L
+        tvLiveTranscript.text = ""
+    }
+
+    private fun isTranscriptNearBottom(): Boolean {
+        val child = transcriptScrollView.getChildAt(0) ?: return true
+
+        val remaining =
+            child.height -
+            (
+                transcriptScrollView.height +
+                transcriptScrollView.scrollY
+            )
+
+        return remaining <= 120
+    }
+
+    private fun scrollTranscriptToBottom() {
+        transcriptScrollView.post {
+            transcriptScrollView.fullScroll(
+                android.view.View.FOCUS_DOWN
+            )
+        }
+    }
+
+    private fun appendPreviewText(text: String) {
+        if (text.isEmpty()) return
+
+        val followBottom = isTranscriptNearBottom()
+
+        previewText.append(text)
+        tvLiveTranscript.append(text)
+
+        if (followBottom) {
+            scrollTranscriptToBottom()
+        }
+    }
+
+    /** Append-only live preview: the note file is the full transcript, UI tails it. */
+    private fun updateLivePreview(path: String) {
+        try {
+            val file = File(path)
+            if (!file.exists()) return
+
+            if (previewPath != path) {
+                previewPath = path
+                resetPreview()
+            }
+
+            val currentLength = file.length()
+
+            // Same file was externally truncated or recreated.
+            if (currentLength < shownTranscriptBytes) {
+                resetPreview()
+            }
+
+            if (currentLength == shownTranscriptBytes) {
+                return
+            }
+
+            RandomAccessFile(file, "r").use { raf ->
+                raf.seek(shownTranscriptBytes)
+
+                while (shownTranscriptBytes < currentLength) {
+                    val remaining =
+                        currentLength - shownTranscriptBytes
+
+                    val wanted =
+                        minOf(remaining, 64L * 1024L).toInt()
+
+                    val buffer = ByteArray(wanted)
+                    val read = raf.read(buffer)
+
+                    if (read <= 0) break
+
+                    shownTranscriptBytes += read
+
+                    val actual =
+                        if (read == buffer.size) {
+                            buffer
+                        } else {
+                            buffer.copyOf(read)
+                        }
+
+                    appendPreviewBytes(actual)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(
+                "MainActivity",
+                "Preview update failed: ${e.message}"
+            )
+        }
+    }
+
+    private fun appendPreviewBytes(newBytes: ByteArray) {
+        val combined =
+            ByteArray(pendingPartialBytes.size + newBytes.size)
+
+        System.arraycopy(
+            pendingPartialBytes,
+            0,
+            combined,
+            0,
+            pendingPartialBytes.size
+        )
+
+        System.arraycopy(
+            newBytes,
+            0,
+            combined,
+            pendingPartialBytes.size,
+            newBytes.size
+        )
+
+        var lastNewline = -1
+
+        for (index in combined.indices.reversed()) {
+            if (combined[index] == '\n'.code.toByte()) {
+                lastNewline = index
+                break
+            }
+        }
+
+        if (lastNewline < 0) {
+            pendingPartialBytes = combined
+            return
+        }
+
+        val completed =
+            combined.copyOfRange(
+                0,
+                lastNewline + 1
+            )
+
+        pendingPartialBytes =
+            combined.copyOfRange(
+                lastNewline + 1,
+                combined.size
+            )
+
+        val text = completed.toString(Charsets.UTF_8)
+
+        appendPreviewText(text)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         tvMeetingStatus = findViewById(R.id.tvMeetingStatus)
         tvMeetingPath = findViewById(R.id.tvMeetingPath)
+        tvLiveTranscript = findViewById(R.id.tvLiveTranscript)
+        transcriptScrollView = findViewById(R.id.transcriptScrollView)
+        tvLiveTranscript.setTextIsSelectable(true)
+        tvLiveTranscript.isLongClickable = true
         tvQueue = findViewById(R.id.tvQueue)
         progressTranscribe = findViewById(R.id.progressTranscribe)
         btnStartMeeting = findViewById(R.id.btnStartMeeting)
@@ -192,7 +358,22 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnClearRecords).setOnClickListener { confirmClearRecordings() }
 
         findViewById<Button>(R.id.btnDonate).setOnClickListener {
-            try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://www.paypal.com/paypalme/jackfood2004"))) } catch (_: Exception) { Toast.makeText(this, "PayPal: jackfood2004@gmail.com", Toast.LENGTH_LONG).show() }
+            try {
+                val uri =
+                    android.net.Uri.parse(
+                        "https://www.paypal.com/paypalme/jackfood2004"
+                    )
+
+                startActivity(
+                    Intent(Intent.ACTION_VIEW, uri)
+                )
+            } catch (_: Exception) {
+                Toast.makeText(
+                    this,
+                    "PayPal: jackfood2004@gmail.com",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
         }
         findViewById<Button>(R.id.btnPrivacy).setOnClickListener { startActivity(Intent(this, PrivacyDashboardActivity::class.java)) }
         findViewById<Button>(R.id.btnPauseQueue).setOnClickListener {
@@ -214,22 +395,13 @@ class MainActivity : AppCompatActivity() {
 
         requestPermissions()
 
-        // preload last-used engine + model
+        // On-demand model policy: do NOT auto-load on app start (battery/RAM).
+        // Model loads when the keyboard is entered, on first keyboard switch,
+        // or when a meeting starts.
         val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
-        val lastModel = prefs.getString("model", "small") ?: "small"
-        val lastEngine = prefs.getString("engine", SttEngines.WHISPER) ?: SttEngines.WHISPER
-        lifecycleScope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    if (!SttEngines.isLoaded(applicationContext, lastEngine, lastModel)) {
-                        SttEngines.ensureModel(applicationContext, lastEngine, lastModel, SttEngines.jobLang(applicationContext))
-                    }
-                }
-            } catch (_: Throwable) {}
-        }
 
         lifecycleScope.launch {
-            while (true) {
+            while (isActive) {
                 kotlinx.coroutines.delay(800)
                 withContext(Dispatchers.Main) {
                     tvQueue.text = TranscriptionQueue.status()
@@ -243,6 +415,9 @@ class MainActivity : AppCompatActivity() {
                         !lastPath.isNullOrEmpty() -> "Last: $lastPath"
                         !lastAudio.isNullOrEmpty() -> "Audio: $lastAudio"
                         else -> ""
+                    }
+                    if (!lastPath.isNullOrEmpty()) {
+                        updateLivePreview(lastPath)
                     }
                 }
             }

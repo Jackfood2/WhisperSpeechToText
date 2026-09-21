@@ -43,6 +43,11 @@
         </LinearLayout>
     </LinearLayout>
 
+    <!-- SPACE row: wide space key -->
+    <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="6dp">
+        <Button android:id="@+id/btnSpace" android:text="SPACE" android:layout_width="0dp" android:layout_weight="1" android:layout_height="52dp" android:textSize="15sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="@drawable/bg_keyboard_key" android:contentDescription="Space"/>
+    </LinearLayout>
+
     <!-- Always visible: progress + processing controls + badge -->
     <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="8dp">
         <ProgressBar android:id="@+id/progressTranscribe" style="?android:attr/progressBarStyleHorizontal" android:layout_width="0dp" android:layout_weight="1" android:layout_height="8dp" android:max="100" android:progress="0" android:progressTint="#00B894"/>

@@ -49,8 +49,8 @@ class ImeRecordService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, "whisper_ime")
-            .setContentTitle("Speech to Text - recording voice typing")
-            .setContentText("Recording continues on lock screen")
+            .setContentTitle("Speech to Text keyboard recording")
+            .setContentText("Keyboard recording stops when screen locks")
             .setSmallIcon(android.R.drawable.presence_audio_online)
             .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

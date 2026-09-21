@@ -25,7 +25,12 @@ class MeetingRecordService : Service() {
         const val TAG = "MeetingService"
         const val CHANNEL_ID = "whisper_meeting"
         const val NOTIFICATION_ID = 101
-        const val CHUNK_DURATION_MS = 30_000L
+        // Chunk rule: 30-59.9s + 2s silence = close; 60s = force-close.
+        const val MIN_CHUNK_MS = 30_000L
+        const val MAX_CHUNK_MS = 60_000L
+        const val SILENCE_MIN_MS = 2_000L
+        const val MIN_CHUNK_BYTES = 8_000
+        const val SILENCE_RMS_THRESHOLD = 0.015
 
         /** Read by MainActivity to enable/disable Start vs Stop (mutually exclusive). */
         @Volatile var isRunning = false
@@ -47,7 +52,8 @@ class MeetingRecordService : Service() {
     private var engine = SttEngines.WHISPER
     private var transcriptFile: File? = null
     private var segmentCounter = 0
-    private val allText = StringBuilder()
+    @Volatile
+    private var activeRecorder: android.media.AudioRecord? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioSaver: FullAudioSaver? = null
     private var audioBaseName = ""
@@ -63,7 +69,7 @@ class MeetingRecordService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             "START" -> {
-                if (isRunning) return START_STICKY // already recording - ignore double tap
+                if (isRunning) return START_NOT_STICKY // already recording - ignore double tap
                 model = intent.getStringExtra("model") ?: "small"
                 lang = intent.getStringExtra("lang") ?: "auto"
                 engine = intent.getStringExtra("engine") ?: SttEngines.WHISPER
@@ -73,7 +79,7 @@ class MeetingRecordService : Service() {
                 requestStop() // fast, non-blocking - final flush happens in background
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun createNotificationChannel() {
@@ -126,6 +132,28 @@ class MeetingRecordService : Service() {
             runCatching { stopSelf() }
             return
         }
+        if (!MicSessionManager.tryAcquire(MicOwner.MEETING)) {
+            Log.w(TAG, "Microphone currently owned by another recorder")
+            uiStatus = "Microphone is busy"
+            runCatching {
+                android.widget.Toast.makeText(this, "Microphone is busy", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            runCatching { stopSelf() }
+            return
+        }
+        // Storage guard: full-session archive can approach ~1GB for long meetings.
+        val saveAudioMeeting = getSharedPreferences("whisper", MODE_PRIVATE).getBoolean("save_audio_meeting", true)
+        val estimatedBytes = if (saveAudioMeeting) 1_000_000_000L else 200_000_000L
+        if (!hasEnoughStorage(applicationContext, estimatedBytes)) {
+            MicSessionManager.release(MicOwner.MEETING)
+            Log.w(TAG, "Not enough free storage for recording")
+            uiStatus = "Not enough free storage for recording"
+            runCatching {
+                android.widget.Toast.makeText(this, "Not enough free storage for recording", android.widget.Toast.LENGTH_LONG).show()
+            }
+            runCatching { stopSelf() }
+            return
+        }
         isRecording = true
         isRunning = true
         isStopping = false
@@ -134,29 +162,47 @@ class MeetingRecordService : Service() {
         uiStatus = "Recording... tap Stop (continues with screen off)"
         startTimeMs = System.currentTimeMillis()
         segmentCounter = 0
-        allText.clear()
 
-        val fmt = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US)
-        val baseName = "meeting_${fmt.format(Date())}"
-        audioBaseName = baseName
+        try {
+            val fmt = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US)
+            val baseName = "meeting_${fmt.format(Date())}"
+            audioBaseName = baseName
 
-        // Meeting always saves a clean words-only transcript + full audio.
-        val docsDir = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
-            "WhisperNotes"
-        )
-        if (!docsDir.exists()) docsDir.mkdirs()
+            // Meeting always saves a clean words-only transcript + full audio.
+            val docsDir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                "WhisperNotes"
+            )
+            if (!docsDir.exists()) docsDir.mkdirs()
 
-        transcriptFile = File(docsDir, "$baseName.txt")
-        transcriptFile?.writeText("")
+            transcriptFile = File(docsDir, "$baseName.txt")
+            transcriptFile?.writeText("")
 
-        // Full-session audio archive alongside the transcript
-        FullAudioSaver.pruneTemp(this)
-        audioSaver = if (getSharedPreferences("whisper", MODE_PRIVATE).getBoolean("save_audio_meeting", true)) {
-            FullAudioSaver(this, FullAudioSaver.notesDir(), baseName)
-        } else null
+            // Full-session audio archive alongside the transcript
+            FullAudioSaver.pruneTemp(this)
+            audioSaver = if (saveAudioMeeting) {
+                FullAudioSaver(this, FullAudioSaver.notesDir(), baseName)
+            } else null
+        } catch (e: Exception) {
+            // Setup failed after mic acquire (e.g. storage I/O):
+            // release everything so state and mic never get stuck.
+            Log.e(TAG, "Meeting setup failed: ${e.message}", e)
+            uiStatus = "Meeting failed to start: ${e.message}"
+            audioSaver = null
+            transcriptFile = null
+            MicSessionManager.release(MicOwner.MEETING)
+            isRecording = false
+            isRunning = false
+            isStopping = false
+            runCatching { stopSelf() }
+            return
+        }
 
-        try { if (wakeLock?.isHeld == false) wakeLock?.acquire(4*60*60*1000L) } catch (_: Exception) {}
+        try {
+            if (wakeLock?.isHeld == false) {
+                wakeLock?.acquire()
+            }
+        } catch (_: Exception) {}
         // Explicit mic type (API 29+ documented form - same as the proven bubble path).
         // Never crash here: without foreground the meeting cannot survive lock screen,
         // so bail out cleanly instead of taking the app down in a crash loop.
@@ -173,6 +219,7 @@ class MeetingRecordService : Service() {
         if (!promoted) {
             Log.e(TAG, "FGS promote denied - meeting recording unavailable on this device state")
             AppLog.e(TAG, "meeting FGS denied - aborting start")
+            MicSessionManager.release(MicOwner.MEETING)
             isRecording = false; isRunning = false; isStopping = false
             runCatching { stopSelf() }
             return
@@ -180,13 +227,18 @@ class MeetingRecordService : Service() {
         Log.i(TAG, "Meeting started: model=$model lang=$lang engine=$engine - WakeLock held, will survive lock screen")
 
         recordThread = Thread {
+            var pcmChunk = ByteArrayOutputStream()
+            var chunkStartTime = System.currentTimeMillis()
+            var recorder: android.media.AudioRecord? = null
+
             try {
-                val recorder = AudioUtils.createRecorder(this@MeetingRecordService)
+                recorder = AudioUtils.createRecorder(this@MeetingRecordService)
+                activeRecorder = recorder
                 recorder.startRecording()
 
-                var pcmChunk = ByteArrayOutputStream()
-                var chunkStartTime = System.currentTimeMillis()
                 var lastNotifUpdate = 0L
+                var silenceStartMs: Long? = null
+                var lastRms: Double
 
                 while (isRecording) {
                     val buffer = ByteArray(4096)
@@ -194,6 +246,13 @@ class MeetingRecordService : Service() {
                     if (read > 0) {
                         pcmChunk.write(buffer, 0, read)
                         audioSaver?.append(buffer, read)
+                        // track silence for VAD boundary
+                        lastRms = AudioUtils.rms16(buffer, read)
+                        if (lastRms < SILENCE_RMS_THRESHOLD) {
+                            if (silenceStartMs == null) silenceStartMs = System.currentTimeMillis()
+                        } else {
+                            silenceStartMs = null
+                        }
                     }
 
                     val now = System.currentTimeMillis()
@@ -208,77 +267,119 @@ class MeetingRecordService : Service() {
                         nm.notify(NOTIFICATION_ID, buildNotification(status))
                     }
 
-                    if (now - chunkStartTime >= CHUNK_DURATION_MS && pcmChunk.size() > 8000) {
-                        flushChunk(pcmChunk, chunkStartTime)
+                    val chunkElapsed = now - chunkStartTime
+
+                    val silenceDurationMs =
+                        if (silenceStartMs != null) {
+                            now - silenceStartMs
+                        } else {
+                            0L
+                        }
+
+                    val isSafeSilence =
+                        silenceDurationMs >= SILENCE_MIN_MS
+
+                    val hasEnoughAudio =
+                        pcmChunk.size() >= MIN_CHUNK_BYTES
+
+                    val shouldFlush =
+                        hasEnoughAudio && (
+                            // Between 30 and 60 seconds, close only at a safe silence boundary.
+                            (chunkElapsed >= MIN_CHUNK_MS && isSafeSilence) ||
+
+                            // Never allow one chunk to exceed 60 seconds.
+                            chunkElapsed >= MAX_CHUNK_MS
+                        )
+
+                    if (shouldFlush) {
+                        val toFlush = pcmChunk
+                        val flushedChunkStart = chunkStartTime
+
                         pcmChunk = ByteArrayOutputStream()
                         chunkStartTime = now
+                        silenceStartMs = null
+
+                        flushChunk(toFlush, flushedChunkStart)
                     }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Recording error: ${e.message}", e)
+            } finally {
+                try { recorder?.stop() } catch (_: Exception) {}
+                // shared recorder stays alive for bubble/keyboard (never release)
+                activeRecorder = null
 
                 // NB: tail bytes were already streamed to audioSaver live in the loop.
                 if (pcmChunk.size() > 4000) {
-                    flushChunk(pcmChunk, chunkStartTime)
+                    val finalChunk = pcmChunk
+                    val finalChunkStart = chunkStartTime
+
+                    flushChunk(finalChunk, finalChunkStart)
                 }
 
-                try {
-                    recorder.stop()
-                    // shared recorder stays alive for bubble/keyboard (never release)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Recorder stop error: ${e.message}")
-                }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Recording error: ${e.message}")
+                Log.i(TAG, "Meeting recording thread finished")
             }
         }.apply {
             isDaemon = true
+            name = "meeting-recorder"
             start()
         }
     }
 
     private fun flushChunk(pcmData: ByteArrayOutputStream, chunkStartMs: Long) {
         try {
-            val pcmFile = File(cacheDir, "meeting_chunk_${System.currentTimeMillis()}.pcm")
+            val timestamp = System.currentTimeMillis()
+
+            val pcmFile =
+                File(cacheDir, "meeting_chunk_$timestamp.pcm")
             FileOutputStream(pcmFile).use { it.write(pcmData.toByteArray()) }
 
-            val wavFile = File(cacheDir, "meeting_chunk_${System.currentTimeMillis()}.wav")
+            val wavFile =
+                File(cacheDir, "meeting_chunk_$timestamp.wav")
             AudioUtils.pcmToWav(pcmFile, wavFile)
             pcmFile.delete()
 
             segmentCounter++
-            Log.i(TAG, "Flushing chunk #$segmentCounter, wav=${wavFile.length()} bytes")
+            // 16 kHz mono 16-bit PCM = 32,000 bytes/sec (matches AudioUtils.createRecorder).
+            val audioSeconds = pcmData.size().toDouble() / 32_000.0
+            Log.i(
+                TAG,
+                "Flushing chunk #$segmentCounter, " +
+                    "duration=${"%.1f".format(audioSeconds)}s, " +
+                    "wav=${wavFile.length()} bytes"
+            )
 
-            TranscriptionQueue.enqueue(
-                TranscriptionQueue.Job(
-                    context = applicationContext,
-                    wavFile = wavFile,
-                    model = model,
-                    lang = lang,
-                    engine = engine,
-                    onResult = { text ->
-                        if (text.isNotBlank()) {
-                            synchronized(this) {
-                                allText.append(text).append(" ")
-
-                                if (transcriptFile != null) {
-                                    // Save clean text only (no timestamps)
-                                    transcriptFile!!.appendText("$text\n")
-                                    getSharedPreferences("whisper", MODE_PRIVATE)
-                                        .edit()
-                                        .putString("last_transcript_path", transcriptFile!!.absolutePath)
-                                        .apply()
-                                }
+            val job = TranscriptionQueue.Job(
+                context = applicationContext,
+                wavFile = wavFile,
+                model = model,
+                lang = lang,
+                engine = engine,
+                onResult = { text ->
+                    val cleaned = text.trim()
+                    if (cleaned.isNotEmpty() && !AudioUtils.isNoSpeechText(cleaned)) {
+                        synchronized(this) {
+                            if (transcriptFile != null) {
+                                // Save clean text only (no timestamps)
+                                transcriptFile!!.appendText("$cleaned\n")
+                                getSharedPreferences("whisper", MODE_PRIVATE)
+                                    .edit()
+                                    .putString("last_transcript_path", transcriptFile!!.absolutePath)
+                                    .apply()
                             }
                         }
-                    },
-                    onError = { error ->
-                        Log.e(TAG, "Chunk failed: $error")
-                        // User-visible: the old code only logged, leaving "1 failed" a mystery.
-                        val n = TranscriptionQueue.failedCount()
-                        uiStatus = "Chunk failed ($n failed): $error"
                     }
-                )
+                },
+                onError = { error ->
+                    Log.e(TAG, "Chunk failed: $error")
+                    // User-visible: the old code only logged, leaving "1 failed" a mystery.
+                    val n = TranscriptionQueue.failedCount()
+                    uiStatus = "Chunk failed ($n failed): $error"
+                }
             )
+            if (!TranscriptionQueue.enqueue(job)) {
+                AppLog.e(TAG, "Unable to enqueue transcription chunk")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "flushChunk error: ${e.message}")
         }
@@ -299,6 +400,12 @@ class MeetingRecordService : Service() {
         }
         isRecording = false
         isStopping = true
+        // Unblock a recorder.read() immediately so the loop exits without delay.
+        try {
+            activeRecorder?.stop()
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to unblock recorder: ${e.message}")
+        }
         uiStatus = "Stopping... transcript saving (wait for queue)"
         Log.i(TAG, "Stop requested - finishing in background...")
         runCatching {
@@ -307,6 +414,7 @@ class MeetingRecordService : Service() {
         }
         Thread {
             try { recordThread?.join(10_000) } catch (_: InterruptedException) {}
+            MicSessionManager.release(MicOwner.MEETING)
 
             // Finalize the full-session audio first (background thread - AAC
             // encode of a long meeting takes seconds), then drain the queue.
@@ -365,8 +473,25 @@ class MeetingRecordService : Service() {
         isRecording = false
         isRunning = false
         isStopping = false
+        MicSessionManager.release(MicOwner.MEETING)
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
         super.onDestroy()
+    }
+
+    fun hasEnoughStorage(
+        context: android.content.Context,
+        requiredBytes: Long
+    ): Boolean {
+
+        val stat =
+            android.os.StatFs(
+                context.filesDir.absolutePath
+            )
+
+        val available =
+            stat.availableBytes
+
+        return available >= requiredBytes
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

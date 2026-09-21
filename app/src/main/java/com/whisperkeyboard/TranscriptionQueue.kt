@@ -171,6 +171,35 @@ object TranscriptionQueue {
     fun isActive(): Boolean = workerRunning.get() || pendingCount.get() > 0
     fun pendingCount(): Int = pendingCount.get()
 
+    fun isCompletelyIdle(): Boolean {
+        return pendingCount.get() == 0 &&
+            queue.isEmpty() &&
+            !workerRunning.get()
+    }
+
+    fun completedTotal(): Int =
+        completedCount.get()
+
+    fun queueDepth(): Int =
+        queue.size
+
+    fun currentAudioSeconds(): Double =
+        currentFileSec
+
+    fun pendingAudioBytes(): Long {
+        return try {
+            queue.sumOf {
+                if (it.wavFile.exists()) {
+                    it.wavFile.length()
+                } else {
+                    0L
+                }
+            }
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
     /** Discard the result of the currently processing job when it finishes; continue with next. */
     fun skipCurrentJob() {
         if (workerRunning.get()) { skipCurrentFlag.set(true); AppLog.i(TAG, "skip requested for current job") }
@@ -196,14 +225,39 @@ object TranscriptionQueue {
         return Pair(cur, total)
     }
 
-    fun enqueue(job: Job) {
+    private const val MAX_PENDING_JOBS = 120
+
+    fun enqueue(job: Job): Boolean {
+
+        if (pendingCount.get() >= MAX_PENDING_JOBS) {
+            AppLog.w(
+                TAG,
+                "Queue full - rejecting ${job.wavFile.name}"
+            )
+
+            try {
+                job.wavFile.delete()
+            } catch (_: Exception) {}
+
+            job.onError("Transcription queue is full")
+            return false
+        }
+
         stopAllFlag.set(false)
         pendingCount.incrementAndGet()
         submittedCount.incrementAndGet()
+
         queue.put(job)
-        Log.i(TAG, "Enqueued job, pending=${pendingCount.get()} paused=${paused.get()}")
+
+        Log.i(
+            TAG,
+            "Enqueued job, pending=${pendingCount.get()}"
+        )
+
         ProcessingService.notifyActivity()
         ensureWorker()
+
+        return true
     }
 
     fun pause() {
@@ -221,7 +275,7 @@ object TranscriptionQueue {
         val drained = mutableListOf<Job>()
         queue.drainTo(drained)
         var deleted = 0
-        for (j in drained) { try { if (j.wavFile.exists()) { j.wavFile.delete(); deleted++ } } catch (_: Exception) {} ; pendingCount.decrementAndGet() }
+        for (j in drained) { try { if (j.wavFile.exists()) { j.wavFile.delete(); deleted++ } } catch (_: Exception) {} ; pendingCount.updateAndGet { current -> (current - 1).coerceAtLeast(0) } }
         // also cancel + discard whatever is processing right now (flag only matters if a job is live,
         // otherwise it would silently swallow the NEXT job)
         if (workerRunning.get()) skipCurrentFlag.set(true)
@@ -364,7 +418,9 @@ object TranscriptionQueue {
                             }
                         }
                         try {
-                            pendingCount.decrementAndGet()
+                            pendingCount.updateAndGet { current ->
+                                (current - 1).coerceAtLeast(0)
+                            }
                             completedCount.incrementAndGet()
                             if (success || job.wavFile.absolutePath.contains("cache")) {
                                 try { if (job.wavFile.exists()) job.wavFile.delete() } catch (_: Exception) {}
