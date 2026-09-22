@@ -16,6 +16,9 @@ android {
         versionName "2.7.10"
 
         ndk {
+            // arm64-only is intentional: 32-bit/x86 builds would bloat the
+            // whisper.cpp native compile and are unsuitable for large models.
+            // x86_64 emulators are therefore unsupported; test on arm64 hardware.
             abiFilters 'arm64-v8a'
         }
 
@@ -29,24 +32,76 @@ android {
         }
     }
 
+    def signingFile = rootProject.file("../gradle-signing.properties")
+    def signingProps = new Properties()
+
+    if (signingFile.exists()) {
+        signingFile.withInputStream {
+            signingProps.load(it)
+        }
+    }
+
+    def requiredSigningKeys = [
+        "whisper.storeFile",
+        "whisper.storePassword",
+        "whisper.keyAlias",
+        "whisper.keyPassword"
+    ]
+
+    def missingSigningKeys = requiredSigningKeys.findAll {
+        !signingProps.getProperty(it)
+    }
+
+    def buildingRelease = gradle.startParameter.taskNames.any {
+        it.toLowerCase(java.util.Locale.ROOT).contains("release")
+    }
+
     signingConfigs {
         release {
-            // credentials live in ~/.gradle/gradle.properties (never committed)
-            def props = new Properties()
-            def f = rootProject.file("../gradle-signing.properties")
-            if (f.exists()) { f.withInputStream { props.load(it) } }
-            storeFile rootProject.file(props.getProperty("whisper.storeFile", "whisper.keystore"))
-            storePassword props.getProperty("whisper.storePassword", "whisper2026")
-            keyAlias props.getProperty("whisper.keyAlias", "whisper")
-            keyPassword props.getProperty("whisper.keyPassword", "whisper2026")
+            if (missingSigningKeys.isEmpty()) {
+                storeFile rootProject.file(
+                    signingProps.getProperty("whisper.storeFile")
+                )
+                storePassword signingProps.getProperty(
+                    "whisper.storePassword"
+                )
+                keyAlias signingProps.getProperty(
+                    "whisper.keyAlias"
+                )
+                keyPassword signingProps.getProperty(
+                    "whisper.keyPassword"
+                )
+            }
         }
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+            debuggable true
+        }
+
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (!missingSigningKeys.isEmpty() && buildingRelease) {
+                throw new GradleException(
+                    "Release signing configuration missing: " +
+                        missingSigningKeys.join(", ")
+                )
+            }
+
+            minifyEnabled true
+            shrinkResources true
+
+            proguardFiles(
+                getDefaultProguardFile(
+                    "proguard-android-optimize.txt"
+                ),
+                "proguard-rules.pro"
+            )
+
             signingConfig signingConfigs.release
+            debuggable false
         }
     }
 
@@ -77,7 +132,9 @@ android {
     }
 
     lint {
-        abortOnError false
+        abortOnError true
+        checkReleaseBuilds true
+        warningsAsErrors false
     }
 }
 
@@ -88,8 +145,6 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-service:2.7.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
-    implementation 'androidx.preference:preference-ktx:1.2.1'
     // Moonshine v2 - on-device streaming STT, English (includes ONNX Runtime, no NDK needed)
     implementation 'ai.moonshine:moonshine-voice:0.1.5'
-    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }

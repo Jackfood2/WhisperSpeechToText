@@ -25,15 +25,7 @@ class PrivacyDashboardActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Capture ANY crash inside this screen: show it on-screen + copy to clipboard,
-        // instead of the app dying with "clear cache" prompts.
-        val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { t, e ->
-            runCatching { saveCrash(e) }
-            var shown = false
-            runCatching { showErrorScreen(e); shown = true }
-            if (!shown) prevHandler?.uncaughtException(t, e) // only kill process if we could not show diagnostics
-        }
+
         try {
             wireUi()
         } catch (e: Throwable) {
@@ -53,7 +45,6 @@ class PrivacyDashboardActivity : AppCompatActivity() {
         } catch (_: Exception) {}
     }
 
-    /** Plain programmatic error screen - cannot fail. */
     private fun showErrorScreen(e: Throwable) {
         val sw = StringWriter()
         e.printStackTrace(PrintWriter(sw))
@@ -82,9 +73,9 @@ class PrivacyDashboardActivity : AppCompatActivity() {
                 val sb = StringBuilder()
                 sb.appendLine("On-device only. No audio leaves your phone.")
                 sb.appendLine("Models stored: getExternalFilesDir/models (cleared on uninstall)")
-                sb.appendLine("Transcripts: Documents/WhisperNotes/*.txt (you control)")
+                sb.appendLine("Transcripts: app-private WhisperNotes/*.txt (you control)")
                 sb.appendLine()
-                sb.appendLine("Adaptive baseline (per-engine avg ratio):")
+                sb.appendLine("Adaptive transcription timing by engine and model:")
                 for (e in listOf(SttEngines.WHISPER, SttEngines.MOONSHINE)) {
                     for (m in listOf("tiny","base","small","medium")) {
                         val key = SttEngines.statsKey(e, m)
@@ -103,8 +94,10 @@ class PrivacyDashboardActivity : AppCompatActivity() {
                 val modelsDir = ModelManager.modelsDir(this)
                 val models = modelsDir.listFiles()?.joinToString(", ") { "${it.name} ${it.length()/1024/1024}MB" } ?: "none"
                 sb.appendLine("Stored models: $models")
-                val docs = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes")
-                val txts = docs.listFiles()?.filter { it.extension=="txt" }?.size ?: 0
+                val docs = FullAudioSaver.privateNotesDir(this)
+                val legacy = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes")
+                val txts = (docs.listFiles()?.filter { it.extension=="txt" } ?: emptyList()).size +
+                    (legacy.listFiles()?.filter { it.extension=="txt" }?.size ?: 0)
                 val failed = File(docs, "failed").listFiles()?.size ?: 0
                 sb.appendLine("Saved transcripts: $txts | Failed saves: $failed")
                 sb.appendLine()
@@ -114,7 +107,8 @@ class PrivacyDashboardActivity : AppCompatActivity() {
 
                 val logSb = StringBuilder()
                 try {
-                    val txtFiles = docs.listFiles()?.filter { it.extension=="txt" }?.sortedByDescending { it.lastModified() }?.take(2) ?: emptyList()
+                    val txtFiles = ((docs.listFiles()?.filter { it.extension=="txt" } ?: emptyList()) +
+                        (File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes").listFiles()?.filter { it.extension=="txt" } ?: emptyList())).sortedByDescending { it.lastModified() }.take(2)
                     for (f in txtFiles) {
                         logSb.appendLine("== ${f.name} ==")
                         logSb.appendLine(f.readText().take(1200))
@@ -140,9 +134,15 @@ class PrivacyDashboardActivity : AppCompatActivity() {
             savedToast("Stats copied")
         }
         findViewById<Button>(R.id.btnClearTranscripts).setOnClickListener {
-            val docs = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes")
+            val dirs = listOf(
+                FullAudioSaver.privateNotesDir(this),
+                File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes")
+            )
             var n = 0
-            docs.listFiles()?.forEach { if (it.extension == "txt") { it.delete(); n++ } }
+            for (d in dirs) {
+                val files: Array<File> = d.listFiles() ?: emptyArray()
+                files.forEach { if (it.isFile && it.extension == "txt") { if (it.delete()) n++ } }
+            }
             savedToast("Deleted $n transcripts"); refresh()
         }
         findViewById<Button>(R.id.btnRefresh).setOnClickListener { refresh() }

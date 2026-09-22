@@ -1,87 +1,86 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent"
-    android:background="#FAFAFA" android:padding="12dp">
+    android:background="@color/app_background" android:padding="12dp" android:fillViewport="true">
 
     <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content">
 
         <!-- Header with gear -->
-        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="16dp" app:cardElevation="4dp" app:cardBackgroundColor="#4527A0">
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="16dp" app:cardElevation="4dp" app:cardBackgroundColor="@color/primary">
             <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="18dp" android:gravity="center_vertical">
                 <LinearLayout android:orientation="vertical" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content">
-                    <TextView android:text="Speech to Text" android:textSize="23sp" android:textStyle="bold" android:textColor="#FFFFFF" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                    <TextView android:text="Offline • Private • On-device • Whisper + Moonshine" android:textSize="13sp" android:textColor="#FFFFFF" android:alpha="0.95" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                    <TextView android:text="Tip: adjust everything in ⚙ Settings." android:textSize="12sp" android:textColor="#FFFFFF" android:alpha="0.9" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"/>
+                    <TextView android:text="@string/speech_to_text" android:textSize="23sp" android:textStyle="bold" android:textColor="@color/white" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                    <TextView android:text="@string/offline_private_on_device_whisper_moonsh" android:textSize="13sp" android:textColor="@color/white" android:alpha="0.95" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                    <TextView android:text="@string/tip_adjust_everything_in_settings" android:textSize="12sp" android:textColor="@color/white" android:alpha="0.9" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"/>
                 </LinearLayout>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnOpenSettings" android:text="⚙ Settings" android:textSize="14sp" android:textStyle="bold" android:textColor="#4527A0" app:backgroundTint="#FFFFFF" app:iconTint="#4527A0" android:layout_width="wrap_content" android:layout_height="44dp" android:paddingStart="14dp" android:paddingEnd="14dp" android:insetTop="0dp" android:insetBottom="0dp" android:contentDescription="Settings"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnOpenSettings" android:text="@string/settings" android:textSize="14sp" android:textStyle="bold" android:textColor="@color/primary" app:backgroundTint="#FFFFFF" app:iconTint="#4527A0" android:layout_width="wrap_content" android:layout_height="44dp" android:paddingStart="14dp" android:paddingEnd="14dp" android:insetTop="0dp" android:insetBottom="0dp" android:contentDescription="Settings"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
         <!-- Setup steps -->
-        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="@color/surface" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
-                <TextView android:text="Setup (one-time)" android:textStyle="bold" android:textSize="15sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnEnableIME" android:text="1. Enable Keyboard" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnPickIME" android:text="2. Switch to Speech to Text" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
+                <TextView android:text="@string/setup_one_time" android:textStyle="bold" android:textSize="15sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnEnableIME" android:text="@string/val_1_enable_keyboard" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnPickIME" android:text="@string/val_2_switch_to_speech_to_text" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
         <!-- Meeting -->
-        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="@color/surface" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
-                <TextView android:text="Meeting Recording (survives lock screen)" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <TextView android:text="Saves clean words-only transcript + full audio to Documents/WhisperNotes." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <TextView android:text="@string/meeting_recording_survives_lock_screen" android:textStyle="bold" android:textSize="14sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <TextView android:text="@string/saves_clean_words_only_transcript_full_a" android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
                 <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
-                    <com.google.android.material.button.MaterialButton android:id="@+id/btnStartMeeting" android:text="Start" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
-                    <com.google.android.material.button.MaterialButton android:id="@+id/btnStopMeeting" android:text="Stop &amp; Save" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="8dp"/>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnStartMeeting" android:text="@string/start" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnStopMeeting" android:text="@string/stop_save" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="8dp"/>
                 </LinearLayout>
-                <TextView android:id="@+id/tvMeetingStatus" android:text="Idle" android:textSize="13sp" android:textColor="#212121" android:textStyle="bold" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
-                <TextView android:id="@+id/tvMeetingPath" android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <androidx.core.widget.NestedScrollView android:id="@+id/transcriptScrollView" android:layout_width="match_parent" android:layout_height="220dp" android:layout_marginTop="6dp" android:background="#F5F5F5" android:fillViewport="true" android:scrollbars="vertical">
-                    <TextView android:id="@+id/tvLiveTranscript" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="220dp" android:padding="10dp" android:text="Live transcript appears here..." android:textColor="#212121" android:textIsSelectable="true" android:longClickable="true" android:focusable="true" android:focusableInTouchMode="true" android:textSize="14sp" android:lineSpacingExtra="3dp"/>
+                <TextView android:id="@+id/tvMeetingStatus" android:text="@string/idle" android:textSize="13sp" android:textColor="@color/text_primary" android:textStyle="bold" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"/>
+                <TextView android:id="@+id/tvMeetingPath" android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <androidx.core.widget.NestedScrollView android:id="@+id/transcriptScrollView" android:layout_width="match_parent" android:layout_height="220dp" android:layout_marginTop="6dp" android:background="@color/panel" android:fillViewport="true" android:scrollbars="vertical">
+                    <TextView android:id="@+id/tvLiveTranscript" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="220dp" android:padding="10dp" android:text="@string/live_transcript_appears_here" android:textColor="@color/text_primary" android:textIsSelectable="true" android:longClickable="true" android:focusable="true" android:focusableInTouchMode="true" android:textSize="14sp" android:lineSpacingExtra="3dp"/>
                 </androidx.core.widget.NestedScrollView>
                 <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
-                    <com.google.android.material.button.MaterialButton android:id="@+id/btnOpenFolder" android:text="Open Folder" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
-                    <com.google.android.material.button.MaterialButton android:id="@+id/btnClearRecords" android:text="Clear All" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="8dp"/>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnOpenFolder" android:text="@string/open_folder" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnClearRecords" android:text="@string/clear_all" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="8dp"/>
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
         <!-- Progress + Queue -->
-        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="@color/surface" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
-                <TextView android:text="Transcription Queue" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <TextView android:text="@string/transcription_queue" android:textStyle="bold" android:textSize="14sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
                 <ProgressBar android:id="@+id/progressTranscribe" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="12dp" android:max="100" android:progress="0" android:layout_marginTop="8dp"/>
-                <TextView android:id="@+id/tvProgressPct" android:text="0% - idle" android:textSize="13sp" android:textStyle="bold" android:textColor="#4527A0" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <TextView android:id="@+id/tvQueue" android:text="Queue: 0 pending | Idle" android:textSize="13sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"/>
+                <TextView android:id="@+id/tvProgressPct" android:text="0% - idle" android:textSize="13sp" android:textStyle="bold" android:textColor="@color/primary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <TextView android:id="@+id/tvQueue" android:text="@string/queue_0_pending_idle" android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"/>
                 <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
-                    <com.google.android.material.button.MaterialButton android:id="@+id/btnPauseQueue" android:text="Pause" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
-                    <com.google.android.material.button.MaterialButton android:id="@+id/btnClearQueue" android:text="Clear" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="6dp"/>
-                    <com.google.android.material.button.MaterialButton android:id="@+id/btnRetryQueue" android:text="Retry Failed" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="6dp"/>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnPauseQueue" android:text="@string/pause" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"/>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnClearQueue" android:text="@string/clear" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="6dp"/>
+                    <com.google.android.material.button.MaterialButton android:id="@+id/btnRetryQueue" android:text="@string/retry_failed" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="6dp"/>
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
         <!-- Donate -->
-        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFF8E1" android:layout_marginTop="12dp" app:strokeColor="#FFD54F" app:strokeWidth="1dp">
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="@color/cream" android:layout_marginTop="12dp" app:strokeColor="#FFD54F" app:strokeWidth="1dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
-                <TextView android:text="Support development  ♥" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <TextView android:text="PayPal: jackfood2004@gmail.com  •  GitHub Sponsors" android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnDonate" android:text="Donate via PayPal" android:icon="@android:drawable/ic_menu_send" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" app:iconGravity="textStart"/>
+                <TextView android:text="@string/support_development" android:textStyle="bold" android:textSize="14sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <TextView android:text="@string/paypal_jackfood2004_gmail_com_github_spo" android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnDonate" android:text="@string/donate_via_paypal" android:icon="@android:drawable/ic_menu_send" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" app:iconGravity="textStart"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
         <!-- Privacy -->
-        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="#FFFFFF" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="@color/surface" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
-                <TextView android:text="Privacy &amp; Logs" android:textStyle="bold" android:textSize="14sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <TextView android:text="On-device only. Adaptive progress stats + transcript preview." android:textSize="12sp" android:textColor="#424242" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnPrivacy" android:text="Open Privacy Dashboard &amp; Logs" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
+                <TextView android:text="@string/privacy_logs" android:textStyle="bold" android:textSize="14sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <TextView android:text="@string/on_device_only_adaptive_progress_stats_t" android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnPrivacy" android:text="@string/open_privacy_dashboard_logs" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <TextView android:text="Tip: In any app, select Speech to Text, tap Speak, talk, tap Stop. LIVE shows preview via composing text. VAD auto-stops on silence." android:textSize="12sp" android:textColor="#212121" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:paddingBottom="12dp"/>
+        <TextView android:text="@string/tip_in_any_app_select_speech_to_text_tap" android:textSize="12sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:paddingBottom="12dp"/>
     </LinearLayout>
-</ScrollView>
-
+</androidx.core.widget.NestedScrollView>

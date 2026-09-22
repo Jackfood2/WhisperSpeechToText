@@ -5,8 +5,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.provider.DocumentsContract
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
@@ -43,11 +41,6 @@ class MainActivity : AppCompatActivity() {
     private val previewText =
         android.text.SpannableStringBuilder()
 
-    /**
-     * Start and Stop are mutually exclusive: exactly one is enabled at any
-     * time. While stopping (background queue drain) both stay disabled so a
-     * double-tap can never launch a second session mid-teardown.
-     */
     private fun refreshMeetingButtons() {
         val running = MeetingRecordService.isRunning
         val stopping = MeetingRecordService.isStopping
@@ -56,33 +49,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun notesDir(): File {
-        val d = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WhisperNotes")
-        if (!d.exists()) d.mkdirs()
-        return d
+        return FullAudioSaver.privateNotesDir(this)
     }
 
-    /** Open the recordings folder in the phone's file manager (SAF view with OEM fallbacks). */
     private fun openRecordingsFolder() {
         val dir = notesDir()
-        val saf = runCatching {
-            val uri = DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Documents/WhisperNotes")
-            startActivity(Intent(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-            true
-        }.getOrDefault(false)
-        if (saf) return
         for (pkg in listOf("com.sec.android.app.myfiles", "com.google.android.documentsui")) {
             val ok = runCatching {
                 startActivity(packageManager.getLaunchIntentForPackage(pkg)!!); true
             }.getOrDefault(false)
             if (ok) {
-                Toast.makeText(this, "Open Documents/WhisperNotes", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Recordings in app storage: ${dir.absolutePath}", Toast.LENGTH_SHORT).show()
                 return
             }
         }
         Toast.makeText(this, "Recordings at: ${dir.absolutePath}", Toast.LENGTH_LONG).show()
     }
 
-    /** Delete ALL transcripts + audio (never models) behind an explicit confirmation. */
     private fun confirmClearRecordings() {
         if (MeetingRecordService.isRunning || MeetingRecordService.isStopping) {
             Toast.makeText(this, "Stop the meeting first", Toast.LENGTH_SHORT).show()
@@ -105,7 +88,6 @@ class MainActivity : AppCompatActivity() {
                 getSharedPreferences("whisper", MODE_PRIVATE).edit()
                     .remove("last_transcript_path").remove("last_audio_path").apply()
                 tvMeetingPath.text = ""
-                previewPath = null
                 resetPreview()
                 Toast.makeText(this, "Deleted $n file(s)", Toast.LENGTH_SHORT).show()
                 AppLog.i("Main", "cleared $n recording files")
@@ -132,7 +114,8 @@ class MainActivity : AppCompatActivity() {
             } else "$pct%"
     }
 
-    private fun resetPreview() {
+    private fun resetPreview(newPath: String? = null) {
+        previewPath = newPath
         previewText.clear()
         pendingPartialBytes = ByteArray(0)
         shownTranscriptBytes = 0L
@@ -173,22 +156,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Append-only live preview: the note file is the full transcript, UI tails it. */
     private fun updateLivePreview(path: String) {
         try {
             val file = File(path)
-            if (!file.exists()) return
+            if (!file.isFile) return
 
             if (previewPath != path) {
-                previewPath = path
-                resetPreview()
+                resetPreview(path)
             }
 
             val currentLength = file.length()
 
-            // Same file was externally truncated or recreated.
             if (currentLength < shownTranscriptBytes) {
-                resetPreview()
+                resetPreview(path)
             }
 
             if (currentLength == shownTranscriptBytes) {
@@ -199,11 +179,8 @@ class MainActivity : AppCompatActivity() {
                 raf.seek(shownTranscriptBytes)
 
                 while (shownTranscriptBytes < currentLength) {
-                    val remaining =
-                        currentLength - shownTranscriptBytes
-
-                    val wanted =
-                        minOf(remaining, 64L * 1024L).toInt()
+                    val remaining = currentLength - shownTranscriptBytes
+                    val wanted = minOf(remaining, 64L * 1024L).toInt()
 
                     val buffer = ByteArray(wanted)
                     val read = raf.read(buffer)
@@ -211,21 +188,15 @@ class MainActivity : AppCompatActivity() {
                     if (read <= 0) break
 
                     shownTranscriptBytes += read
-
-                    val actual =
-                        if (read == buffer.size) {
-                            buffer
-                        } else {
-                            buffer.copyOf(read)
-                        }
-
-                    appendPreviewBytes(actual)
+                    appendPreviewBytes(
+                        if (read == buffer.size) buffer else buffer.copyOf(read)
+                    )
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.w(
+            AppLog.w(
                 "MainActivity",
-                "Preview update failed: ${e.message}"
+                "Preview update failed: ${e.javaClass.simpleName}: ${e.message}"
             )
         }
     }
@@ -296,7 +267,6 @@ class MainActivity : AppCompatActivity() {
         btnStartMeeting = findViewById(R.id.btnStartMeeting)
         btnStopMeeting = findViewById(R.id.btnStopMeeting)
 
-        // gear icon -> comprehensive settings
         findViewById<Button>(R.id.btnOpenSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
@@ -318,9 +288,7 @@ class MainActivity : AppCompatActivity() {
             val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
             val engine = SttEngines.current(this)
             val model = prefs.getString("model", "small") ?: "small"
-            // Preflight: never record a meeting the engine cannot transcribe.
-            // Written to the SERVICE status (not the TextView) because the poll loop
-            // redisplays uiStatus every 800ms and would clobber a local message.
+
             val missing = SttEngines.describeMissing(this, engine, model)
             if (missing != null) {
                 Toast.makeText(this, "$engine: $missing", Toast.LENGTH_LONG).show()
@@ -329,6 +297,14 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             val lang = SttEngines.jobLang(this)
+            prefs.edit()
+                .remove("last_transcript_path")
+                .remove("last_audio_path")
+                .apply()
+
+            tvMeetingPath.text = ""
+            resetPreview()
+
             val intent = Intent(this, MeetingRecordService::class.java)
             intent.action = "START"
             intent.putExtra("model", model)
@@ -393,11 +369,15 @@ class MainActivity : AppCompatActivity() {
         progressTranscribe.progress = TranscriptionQueue.progress()
         tvProgressPctText(TranscriptionQueue.progress())
 
-        requestPermissions()
+        if (
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.RECORD_AUDIO
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions()
+        }
 
-        // On-demand model policy: do NOT auto-load on app start (battery/RAM).
-        // Model loads when the keyboard is entered, on first keyboard switch,
-        // or when a meeting starts.
         val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
 
         lifecycleScope.launch {
@@ -406,7 +386,7 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     tvQueue.text = TranscriptionQueue.status()
                     refreshMeetingButtons()
-                    // Service is the source of truth: flips Recording -> Stopping -> Saved ✓
+
                     tvMeetingStatus.text = MeetingRecordService.uiStatus
                     val lastPath = prefs.getString("last_transcript_path", "")
                     val lastAudio = prefs.getString("last_audio_path", "")
@@ -449,10 +429,42 @@ class MainActivity : AppCompatActivity() {
         ActivityCompat.requestPermissions(this, perms.toTypedArray(), permRequestCode)
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == permRequestCode && grantResults.any { it != PackageManager.PERMISSION_GRANTED }) {
-            Toast.makeText(this, "Mic permission required", Toast.LENGTH_LONG).show()
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(
+            requestCode,
+            permissions,
+            grantResults
+        )
+
+        if (requestCode != permRequestCode) return
+
+        permissions.forEachIndexed { index, permission ->
+            val granted =
+                grantResults.getOrNull(index) ==
+                    PackageManager.PERMISSION_GRANTED
+
+            if (!granted) {
+                val message = when (permission) {
+                    Manifest.permission.RECORD_AUDIO ->
+                        "Microphone permission is required for recording"
+
+                    Manifest.permission.POST_NOTIFICATIONS ->
+                        "Notifications are disabled. Recording status may not be visible"
+
+                    else ->
+                        "A required permission was denied"
+                }
+
+                Toast.makeText(
+                    this,
+                    message,
+                    Toast.LENGTH_LONG
+                ).show()
+            }
         }
     }
 }

@@ -29,7 +29,7 @@
         <FrameLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content">
             <androidx.appcompat.widget.AppCompatImageButton
                 android:id="@+id/btnMicCircle"
-                android:layout_width="84dp" android:layout_height="84dp"
+                android:layout_width="72dp" android:layout_height="72dp"
                 android:layout_gravity="center_horizontal"
                 android:background="@drawable/bg_circle"
                 android:backgroundTint="#00B894"

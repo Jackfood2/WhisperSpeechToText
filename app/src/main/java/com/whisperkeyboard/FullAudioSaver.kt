@@ -10,21 +10,6 @@ import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 
-/**
- * Saves the FULL session audio next to the transcript while transcription runs.
- *
- * Why WAV + M4A and not MP3: Android ships NO MP3 encoder (MediaCodec can
- * decode MP3 but cannot encode it on virtually any device). Real MP3 would
- * require bundling LAME/FFmpeg as native code (extra ~1-2 MB, LGPL licensing,
- * NDK build complexity). Instead we offer:
- *  - WAV: lossless 16 kHz mono PCM, ~1.9 MB/min - plays everywhere, zero risk.
- *  - M4A (AAC-LC via hardware MediaCodec): ~0.24 MB/min, plays on
- *    Android/iOS/Windows. Falls back to WAV automatically if the encoder fails.
- *
- * Design: mic bytes are streamed to a temp .pcm in cache (never held in RAM -
- * a 1-hour meeting is ~115 MB), then finalized to Documents/WhisperNotes with
- * the same base name as the transcript (+ "_audio").
- */
 class FullAudioSaver(
     private val context: Context,
     private val destDir: File,
@@ -35,23 +20,22 @@ class FullAudioSaver(
     private var bytesWritten = 0L
     private var closed = false
 
-    /** Append raw 16-bit mono 16 kHz bytes from the recorder loop. Cheap, thread-safe. */
     @Synchronized
     fun append(data: ByteArray, len: Int) {
         if (closed || len <= 0) return
+
+        val safeLength = len.coerceAtMost(data.size)
+        if (safeLength <= 0) return
+
         try {
-            out?.write(data, 0, len)
-            bytesWritten += len
+            val stream = out ?: return
+            stream.write(data, 0, safeLength)
+            bytesWritten += safeLength
         } catch (e: Exception) {
-            Log.w(TAG, "append failed: ${e.message}")
+            Log.w(TAG, "Audio append failed: ${e.javaClass.simpleName}: ${e.message}")
         }
     }
 
-    /**
-     * Close the stream and write the final file. Runs on the caller's thread -
-     * call from a background thread (M4A encode of a long meeting takes seconds).
-     * Returns the saved file, or null if there was <0.5 s of audio / on failure.
-     */
     fun finish(format: String): File? {
         synchronized(this) {
             if (closed) return null
@@ -97,7 +81,6 @@ class FullAudioSaver(
         }
     }
 
-    /** Abandon the recording without saving (e.g. empty session). */
     fun discard() {
         synchronized(this) {
             closed = true
@@ -109,7 +92,7 @@ class FullAudioSaver(
 
     companion object {
         private const val TAG = "FullAudio"
-        private const val MIN_BYTES = 16000L // 0.5 s of 16 kHz 16-bit mono
+        private const val MIN_BYTES = 16000L
 
         fun notesDir(): File {
             val d = File(
@@ -120,7 +103,22 @@ class FullAudioSaver(
             return d
         }
 
-        /** Keep storage bounded: max 50 audio files, drop anything older than 30 days. */
+        fun privateNotesDir(ctx: Context): File {
+            val d = File(ctx.getExternalFilesDir(null), "WhisperNotes")
+            if (!d.exists() && !d.mkdirs()) {
+                throw java.io.IOException(
+                    "Unable to create directory: ${d.absolutePath}"
+                )
+            }
+
+            if (!d.isDirectory) {
+                throw java.io.IOException(
+                    "Destination is not a directory: ${d.absolutePath}"
+                )
+            }
+            return d
+        }
+
         fun pruneAudio(dir: File, keepNewest: Int = 50, maxAgeDays: Int = 30) {
             try {
                 val files = dir.listFiles { f ->
@@ -137,7 +135,6 @@ class FullAudioSaver(
             }
         }
 
-        /** Delete orphaned full-session temp files from crashes/kills. */
         fun pruneTemp(ctx: Context) {
             try {
                 ctx.cacheDir.listFiles { f -> f.name.endsWith("_full_.pcm") || f.name.contains("_full_") && f.name.endsWith(".pcm") }
@@ -166,10 +163,6 @@ class FullAudioSaver(
             }
         }
 
-        /**
-         * Stream the PCM file through the hardware AAC encoder into .m4a.
-         * 16 kHz mono AAC-LC @ 32 kbps - voice-transparent at ~0.24 MB/min.
-         */
         private fun pcmFileToM4a(pcm: File, out: File) {
             val sampleRate = AudioUtils.SAMPLE_RATE
             val codec = MediaCodec.createEncoderByType("audio/mp4a-latm")
@@ -189,9 +182,16 @@ class FullAudioSaver(
                     var inputEos = false
                     var outputEos = false
                     var ptsUs = 0L
+                    var inputBytesRead = 0L
+                    val inputLength = pcm.length()
+                    val encodeDeadline =
+                        android.os.SystemClock.elapsedRealtime() + 5L * 60L * 1000L
                     pcm.inputStream().buffered().use { inp ->
                         val readBuf = ByteArray(2048)
                         while (!outputEos) {
+                            if (android.os.SystemClock.elapsedRealtime() >= encodeDeadline) {
+                                throw IllegalStateException("AAC encoder timed out")
+                            }
                             if (!inputEos) {
                                 val inIdx = codec.dequeueInputBuffer(5000)
                                 if (inIdx >= 0) {
@@ -209,12 +209,31 @@ class FullAudioSaver(
                                             n += r
                                         }
                                         if (n > 0) {
-                                            ptsUs += (n / 2 * 1_000_000L / sampleRate)
-                                            // FileInputStream.available()==0 reliably means EOF for files
-                                            val eof = inp.available() == 0
-                                            codec.queueInputBuffer(inIdx, 0, n, ptsUs,
-                                                if (eof) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0)
-                                            if (eof) inputEos = true
+                                            inputBytesRead += n
+
+                                            val endOfInput = inputBytesRead >= inputLength
+                                            val flags = if (endOfInput) {
+                                                MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                                            } else {
+                                                0
+                                            }
+
+                                            codec.queueInputBuffer(
+                                                inIdx,
+                                                0,
+                                                n,
+                                                ptsUs,
+                                                flags
+                                            )
+
+                                            ptsUs +=
+                                                (n.toLong() / 2L) *
+                                                1_000_000L /
+                                                sampleRate
+
+                                            if (endOfInput) {
+                                                inputEos = true
+                                            }
                                         } else {
                                             codec.queueInputBuffer(inIdx, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                                             inputEos = true
@@ -233,6 +252,11 @@ class FullAudioSaver(
                                     }
                                 }
                                 outIdx >= 0 -> {
+                                    if (
+                                        info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
+                                    ) {
+                                        info.size = 0
+                                    }
                                     val outBuf = codec.getOutputBuffer(outIdx)
                                     if (outBuf != null && info.size > 0 && muxerStarted) {
                                         outBuf.position(info.offset)
@@ -245,11 +269,16 @@ class FullAudioSaver(
                             }
                         }
                     }
-                    if (muxerStarted) muxer!!.stop()
-                    muxer?.release()
+                    try {
+                        if (muxerStarted) {
+                            muxer?.stop()
+                        }
+                    } finally {
+                        muxer?.release()
+                        muxer = null
+                    }
                     if (!muxerStarted) throw IllegalStateException("encoder produced no output")
                 } catch (e: Exception) {
-                    try { muxer?.release() } catch (_: Exception) {}
                     throw e
                 }
             } finally {

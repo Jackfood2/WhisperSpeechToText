@@ -5,43 +5,34 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 
-/**
- * Silent status-icon holder + idle model unloader.
- *
- * Shows ONE static status-bar icon (round green dot, like a wifi indicator)
- * while the Whisper model is in memory, and removes it the moment the model
- * unloads. No progress text, no unload countdown, no upload animation - the
- * notification shade entry is minimal and silent.
- *
- * The service also enforces the user's "Unload model when idle" timeout
- * (strictly: only real work - active recording or queued/in-flight
- * transcription - blocks the countdown) and keeps the process alive so that
- * transcription started from the keyboard keeps running after the user
- * switches back to the default keyboard.
- */
 class ProcessingService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var idleTicks = 0
 
-    /**
-     * Single source of truth for "model must stay": only REAL work blocks the countdown -
-     * an active recording or transcription actually in flight/queued.
-     *
-     * Waiting-to-type and outstanding transcripts do NOT block it: they are
-     * already finished text cached in OutstandingStore/TextRouter - inserting them later
-     * just commits the stored string, whisper is never needed again for them.
-     */
     private fun busyNow(): Boolean {
-        val recNow = runCatching { QuickSwitchService.recActive }.getOrDefault(false) ||
-                runCatching { WhisperKeyboardService.imeRecording }.getOrDefault(false)
-        return TranscriptionQueue.isActive() || recNow
+        val recordingNow =
+            runCatching { QuickSwitchService.recActive }.getOrDefault(false) ||
+            runCatching { WhisperKeyboardService.imeRecording }.getOrDefault(false) ||
+            MeetingRecordService.isRunning ||
+            MeetingRecordService.isStopping
+
+        val transcriptionNow =
+            TranscriptionQueue.isActive() ||
+            TranscriptionQueue.pendingCount() > 0 ||
+            SttEngines.busy()
+
+        val deliveryNow =
+            TextRouter.pendingTypingCount() > 0
+
+        return recordingNow || transcriptionNow || deliveryNow
     }
 
     private val poller = object : Runnable {
@@ -49,19 +40,23 @@ class ProcessingService : Service() {
             val busy = busyNow()
             if (!busy) {
                 idleTicks++
-                // STRICT user setting: unload exactly after unload_idle_ticks*30s of inactivity.
-                val ticksAllowed = getSharedPreferences("whisper", MODE_PRIVATE).getInt("unload_idle_ticks", 2) * 30
+
+                val configuredMinutes =
+                    getSharedPreferences("whisper", MODE_PRIVATE)
+                        .getInt("unload_idle_ticks", 2)
+                        .coerceIn(0, 120)
+
+                val ticksAllowed = configuredMinutes * 30
 
                 if (ticksAllowed > 0 && idleTicks == ticksAllowed) {
-                    // Final re-check inside the unload thread: if anything became active
-                    // at the last second, skip - the busy branch resets the countdown.
+
                     Thread {
                         if (!busyNow()) {
                             SttEngines.unloadIdle()
                         } else {
                             AppLog.i("Processing", "unload skipped - activity resumed")
                         }
-                        // Back on the service thread: no engine loaded -> remove the icon.
+
                         handler.post {
                             if (SttEngines.loadedModel() == null) {
                                 runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
@@ -74,7 +69,7 @@ class ProcessingService : Service() {
                     stopSelf()
                     return
                 }
-                // ticksAllowed == 0 ("Never"): keep the icon, never unload, never stop.
+
             } else {
                 idleTicks = 0
             }
@@ -85,13 +80,22 @@ class ProcessingService : Service() {
     override fun onCreate() {
         super.onCreate()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // MIN: silent, no heads-up, no badge - status-bar icon only (wifi-style).
+
             val ch = NotificationChannel(CHANNEL, "Model status", NotificationManager.IMPORTANCE_MIN)
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
-        // Non-essential service: if promotion is ever denied, die quietly instead
-        // of crashing the process (the models simply stay warm until next time).
-        val promoted = runCatching { startForeground(NOTIF_ID, buildStaticNotif()) }.isSuccess
+
+        val promoted = runCatching {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(
+                    NOTIF_ID,
+                    buildStaticNotif(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIF_ID, buildStaticNotif())
+            }
+        }.isSuccess
         if (!promoted) {
             runCatching { stopSelf() }
             return
@@ -99,7 +103,6 @@ class ProcessingService : Service() {
         handler.post(poller)
     }
 
-    /** The single static icon: round dot = model in memory. No counters, no countdown. */
     private fun buildStaticNotif(): Notification {
         val contentIntent = android.app.PendingIntent.getActivity(
             this, 21,
@@ -137,11 +140,10 @@ class ProcessingService : Service() {
         const val CHANNEL = "processing"
         const val NOTIF_ID = 103
 
-        /** Start/nudge the status icon (called from any thread). */
         @Volatile private var lastStart = 0L
         fun notifyActivity() {
             val now = System.currentTimeMillis()
-            if (now - lastStart < 900) return // throttle
+            if (now - lastStart < 900) return
             lastStart = now
             try {
                 val ctx = WhisperApp.holder

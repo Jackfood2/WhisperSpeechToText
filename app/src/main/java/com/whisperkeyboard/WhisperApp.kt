@@ -13,12 +13,6 @@ class WhisperApp : Application() {
         installGlobalCrashCapture()
     }
 
-    /**
-     * Capture ANY crash in ANY process (app launch, IME, services) to
-     * dashboard_crash.txt, which Privacy Dashboard already displays.
-     * Previously only crashes inside Privacy Dashboard itself were saved,
-     * so a launch crash left no trace.
-     */
     private fun installGlobalCrashCapture() {
         val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
@@ -34,11 +28,7 @@ class WhisperApp : Application() {
             prevHandler?.uncaughtException(t, e)
         }
     }
-    /**
-     * OS memory pressure: drop idle voice models (each unload is busy-guarded,
-     * so a mid-transcription engine is never yanked). The models reload on
-     * next use; transcripts/queue are unaffected.
-     */
+
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         if (level >= TRIM_MEMORY_MODERATE) {

@@ -24,16 +24,6 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 
-/**
- * Floating round mic bubble - 3 states:
- *  GREY   idle          : tap = start recording; long-press = switch keyboard
- *  GREEN  recording     : tap = stop recording (chunks keep processing)
- *  YELLOW processing    : tap = start a NEW recording (previous processing is not interrupted)
- * When all processing + typing finishes, yellow returns to grey.
- *
- * Delivery: typed into the focused field when possible, else parked in the
- * outstanding-transcript flow (notification + keyboard insert button).
- */
 class QuickSwitchService : Service() {
 
     companion object {
@@ -48,10 +38,8 @@ class QuickSwitchService : Service() {
         const val STATE_REC = 1
         const val STATE_PROC = 2
 
-        /** Readable by ProcessingService for strict idle-timeout accounting. */
         @Volatile var recActive = false
 
-        /** Incremented per recording session; stale watchers/writers bail when it changes. */
         @Volatile var sessionGen = 0
     }
 
@@ -68,7 +56,6 @@ class QuickSwitchService : Service() {
     @Volatile private var lastNotifRefresh = 0L
     private var fnameCounter = 0
 
-    /** Process-shared recorder - owned by AudioUtils, reused by keyboard too. Never released between sessions. */
     private fun obtainRecorder(): AudioRecord = AudioUtils.createRecorder(this)
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -79,9 +66,7 @@ class QuickSwitchService : Service() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "Quick switch", NotificationManager.IMPORTANCE_MIN))
         }
-        // CRITICAL: declare the microphone FGS type at start time - without it Android 14+
-        // serves SILENCE to the mic whenever no app component (activity/IME) is visible.
-        // Never crash here (v2.7.3 lesson): if the device denies mic-FGS, bail out cleanly.
+
         val promoted = runCatching {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 startForeground(NOTIF_ID, buildNotif(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
@@ -118,7 +103,7 @@ class QuickSwitchService : Service() {
             .addAction(0, "Keyboard", switchIntent)
         when {
             recActive -> {
-                val secs = (System.currentTimeMillis() - recStartTs) / 1000
+                val secs = (android.os.SystemClock.elapsedRealtime() - recStartTs) / 1000
                 b.setContentText("Recording ${secs}s - tap bubble to stop")
                 b.addAction(0, "\u25A0 Stop", stopIntent)
             }
@@ -128,9 +113,8 @@ class QuickSwitchService : Service() {
         return b.build()
     }
 
-    /** Live refresh of the FGS notification. force=true bypasses throttle (state transitions). */
     private fun refreshNotif(force: Boolean = false) {
-        val now = System.currentTimeMillis()
+        val now = android.os.SystemClock.elapsedRealtime()
         if (!force && now - lastNotifRefresh < 1000) return
         lastNotifRefresh = now
         runCatching { getSystemService(NotificationManager::class.java)?.notify(NOTIF_ID, buildNotif()) }
@@ -154,9 +138,9 @@ class QuickSwitchService : Service() {
             canvas.drawCircle(width / 2f, height / 2f, r, fill)
             canvas.drawCircle(width / 2f, height / 2f, r, ringPaint)
             val glyph = when (state) {
-                STATE_REC -> "\u25A0"      // stop square
-                STATE_PROC -> "..."        // processing
-                else -> context.getString(R.string.mic_glyph) // mic
+                STATE_REC -> "\u25A0"
+                STATE_PROC -> "..."
+                else -> context.getString(R.string.mic_glyph)
             }
             val y = height / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
             canvas.drawText(glyph, width / 2f, y, textPaint)
@@ -215,16 +199,12 @@ class QuickSwitchService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    // Our listener consumes all events, so Android's built-in long-press never
-                    // fires - decide purely from duration + movement:
-                    //   tap            = record toggle
-                    //   hold (>=450ms) = switch keyboard (stationary OR after a reposition-drag)
-                    //   short drag     = just repositioned
+
                     val heldMs = android.os.SystemClock.uptimeMillis() - downAt
                     when {
                         heldMs >= 450 && !recActive -> v.performLongClick()
                         !moved -> v.performClick()
-                        // dragged briefly while recording = reposition only
+
                     }
                     true
                 }
@@ -238,19 +218,28 @@ class QuickSwitchService : Service() {
         try { wm?.addView(btn, params); applyAlpha() } catch (e: Exception) { AppLog.e("Bubble", "overlay failed: ${e.message}") }
     }
 
-    /** Tap behavior per state: IDLE->record, REC->stop(+process), PROC->start new session too. */
     private fun handleTap() {
         when (state) {
             STATE_IDLE -> startRec()
             STATE_REC -> stopRec()
-            STATE_PROC -> startRec() // previous processing continues untouched
+            STATE_PROC -> startRec()
         }
     }
-
     private fun startRec() {
         if (recActive) return
+
         if (WhisperKeyboardService.imeRecording) {
             toast("Keyboard is already recording - stop it first")
+            return
+        }
+
+        if (
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.RECORD_AUDIO
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            toast("Microphone permission required - open the app")
             return
         }
         val prefs = getSharedPreferences("whisper", MODE_PRIVATE)
@@ -273,14 +262,13 @@ class QuickSwitchService : Service() {
         }
     }
 
-    /** Remainder of startRec() — runs only while this session owns the mic. */
     private fun startRecAfterAcquire(
         prefs: android.content.SharedPreferences,
         engine: String,
         model: String
     ) {
-        ensureWhisperActive() // best effort so delivery can type directly
-        // start recording NOW; load the model concurrently (first chunk waits in queue)
+        ensureWhisperActive()
+
         if (!SttEngines.isLoaded(this, engine, model)) {
             Thread {
                 SttEngines.ensureModel(this, engine, model, SttEngines.jobLang(this))
@@ -288,37 +276,34 @@ class QuickSwitchService : Service() {
         }
         sessionHadVoice = false
         chunksSent = 0
-        recStartTs = System.currentTimeMillis()
+        recStartTs = android.os.SystemClock.elapsedRealtime()
         recActive = true
         setState(STATE_REC, null)
         toast("Recording started - tap to stop")
-        // NOTE: bubble sessions type straight via TextRouter - no audio file is kept
-        // (meeting recordings still archive audio next to the TXT).
-        refreshNotif(true) // notification must reflect REC immediately (timer starts from here)
+
+        refreshNotif(true)
         AppLog.i("Bubble", "recording started")
-        // keep CPU alive while locked so recording never stalls
+
         val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
         val wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "Whisper:BubbleRec")
         wakeLock.acquire(30 * 60 * 1000L)
         val lang = SttEngines.jobLang(this)
-        // per-session buffer: a fast stop/start must never share audio with the dying session
+
         val pcmChunk = ByteArrayOutputStream()
-        // threads hand off cleanly: new session waits for the old one to finish its final flush
+
         val prevThread = recThread
-        sessionGen++ // invalidate stale watchers from previous sessions
+        sessionGen++
         val myGen = sessionGen
         if (engine == SttEngines.WHISPER) WhisperEngine.applyThreadPref(this) else MoonshineEngine.applyThreadPref(this)
         recThread = Thread {
-            var lastVoiceTime = System.currentTimeMillis()
+            var lastVoiceTime = android.os.SystemClock.elapsedRealtime()
             var chunkStartMs = lastVoiceTime
             var gotVoice = false
-            var chunkHadVoice = false // voice arrived since the last flush - guards against pause-silence chunks
+            var chunkHadVoice = false
             val chunked = prefs.getBoolean("bubble_chunked", true)
             try {
-                prevThread?.join(1200) // old session flushes & exits first (deterministic handoff)
+                prevThread?.join(1200)
 
-                // SELF-HEAL: if anything flipped our state away from REC while we own the mic,
-                // restore it so a stale watcher can never visually kill an active recording.
                 fun healState() {
                     if (recActive && myGen == sessionGen && state != STATE_REC) {
                         AppLog.w("Bubble", "state self-heal -> REC")
@@ -329,7 +314,6 @@ class QuickSwitchService : Service() {
                 var rec = obtainRecorder()
                 activeBubbleRecorder = rec
 
-                // restart capture for this session; retry a few times on slow devices
                 var started = false
                 repeat(4) {
                     if (started) return@repeat
@@ -350,7 +334,7 @@ class QuickSwitchService : Service() {
                 while (recActive) {
                     val n = try { rec.read(buf, 0, buf.size) } catch (e: Exception) { AppLog.e("Bubble", "read threw: ${e.message}"); -1 }
                     if (n <= 0) {
-                        // transient errors happen (BT handoff etc.) - restart once, bail after streak
+
                         badReads++
                         AppLog.w("Bubble", "read=$n badStreak=$badReads recActive=$recActive")
                         if (badReads == 3) { try { rec.startRecording() } catch (_: Exception) {} }
@@ -363,8 +347,6 @@ class QuickSwitchService : Service() {
                     val rms = AudioUtils.rms16(buf, n)
                     if (rms > peakRms) peakRms = rms
 
-                    // SELF-HEAL: ~3s of pure digital silence means the HAL/permission layer
-                    // handed us a dead stream. Rebuild the shared recorder once.
                     if (!gotVoice && !recycledOnce && frame >= 24 && peakRms <= 0.0005) {
                         recycledOnce = true
                         AppLog.w("Bubble", "dead mic stream - recycling shared recorder")
@@ -385,9 +367,9 @@ class QuickSwitchService : Service() {
                         continue
                     }
 
-                    val now = System.currentTimeMillis()
-                    val voiced = rms > 0.008 // bubble: lenient gate; transcription decides speech vs noise
-                    // always buffer - preserves the very start of speech (prevents front cut)
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    val voiced = rms > 0.008
+
                     synchronized(pcmChunk) { pcmChunk.write(buf, 0, n) }
                     if (voiced) { gotVoice = true; sessionHadVoice = true; chunkHadVoice = true; lastVoiceTime = now }
                     if (gotVoice) {
@@ -416,8 +398,7 @@ class QuickSwitchService : Service() {
                             }
 
                         if (closeChunk) {
-                            // only flush chunks that contain NEW voice - a long pause must not
-                            // produce an endless series of silence-only chunks after each flush
+
                             if (chunkHadVoice) {
                                 if (flushChunk(pcmChunk, engine, model, lang)) chunksSent++
                             } else {
@@ -434,7 +415,7 @@ class QuickSwitchService : Service() {
                     }
                 }
                 AppLog.i("Bubble", "loop exited (recActive=$recActive, chunks=$chunksSent, gotVoice=$gotVoice)")
-                // stop capture but KEEP the recorder for reuse; final flush then hand off
+
                 try { rec.stop() } catch (_: Exception) {}
                 if (chunkHadVoice && flushChunk(pcmChunk, engine, model, lang)) chunksSent++
                 finalFlushPending = false
@@ -445,16 +426,13 @@ class QuickSwitchService : Service() {
                 AppLog.e("Bubble", "rec error: ${e.message}")
                 handler.post { toast("Mic error: ${e.message}") }
             } finally {
-                // CRITICAL: clear this even on natural/mic-failure exit - if it stays true,
-                // every future tap hits the startRec guard and the bubble is dead until reboot
+
                 recActive = false
                 MicSessionManager.release(MicOwner.BUBBLE)
-                // STOP but never RELEASE the shared recorder: releasing+recreating within
-                // seconds yields an all-zero stream on Samsung HALs; the keyboard reuses
-                // the same healthy instance via AudioUtils.createRecorder()
+
                 try { activeBubbleRecorder?.stop() } catch (_: Exception) {}
                 activeBubbleRecorder = null
-                finalFlushPending = false // crash-safe: never leave the watcher stuck
+                finalFlushPending = false
                 try { wakeLock.release() } catch (_: Exception) {}
                 handler.post {
                     if (state == STATE_REC) enterProcessing()
@@ -468,12 +446,12 @@ class QuickSwitchService : Service() {
     private fun stopRec() {
         if (!recActive) return
         recActive = false
-        try { activeBubbleRecorder?.stop() } catch (_: Exception) {} // unblock read() NOW
+        try { activeBubbleRecorder?.stop() } catch (_: Exception) {}
         finalFlushPending = true
         setState(STATE_PROC, "Recording stopped - processing...")
-        refreshNotif(true) // never leave a stale "Recording Xs" notification behind
+        refreshNotif(true)
         AppLog.i("Bubble", "recording stopped by tap")
-        watchCompletion(sessionGen) // drive yellow -> grey once everything is delivered
+        watchCompletion(sessionGen)
     }
 
     private fun enterProcessing() {
@@ -482,7 +460,6 @@ class QuickSwitchService : Service() {
         watchCompletion(sessionGen)
     }
 
-    /** Yellow until every chunk is transcribed AND delivered (typed or parked). */
     private fun watchCompletion(
         gen: Int,
         attempt: Int = 0
@@ -507,12 +484,11 @@ class QuickSwitchService : Service() {
             )
         } else {
             setState(STATE_IDLE, "Done - transcript delivered or held for later")
-            refreshNotif(true) // back to the idle hint text - never frozen on "Recording Xs"
+            refreshNotif(true)
             AppLog.i("Bubble", "processing complete -> idle")
         }
     }
 
-    /** Write one chunk WAV and enqueue; delivery handled by TextRouter. Returns true if enqueued. */
     private fun flushChunk(buffer: ByteArrayOutputStream, engine: String, model: String, lang: String): Boolean {
         val bytes = synchronized(buffer) { buffer.toByteArray() }
         if (bytes.size < MIN_CHUNK_BYTES) return false
@@ -523,7 +499,7 @@ class QuickSwitchService : Service() {
             if (sample > peak) peak = sample
             i += 2
         }
-        // only drop true digital silence and only if the whole session never had voice
+
         if (peak < 120 && !sessionHadVoice) {
             AppLog.i("Bubble", "leading silence dropped (peak=$peak)")
             return false
@@ -570,7 +546,6 @@ class QuickSwitchService : Service() {
         }
     }
 
-    /** Best-effort: make Whisper the active IME so delivery can type directly (needs WRITE_SECURE_SETTINGS). */
     private fun ensureWhisperActive(): Boolean {
         return try {
             val current = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) ?: ""
@@ -583,7 +558,6 @@ class QuickSwitchService : Service() {
         } catch (e: Exception) { false }
     }
 
-    /** Switch to Whisper IME / back. Without WRITE_SECURE_SETTINGS this silently opens the system picker. */
     private fun toggleIme() {
         try {
             val current = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) ?: ""
@@ -592,8 +566,7 @@ class QuickSwitchService : Service() {
                 !current.equals(WHISPER_IME, ignoreCase = true)
 
             if (goingWhisper) {
-                // Request one automatic recording for the current model
-                // session. Actual recording starts when the IME view appears.
+
                 KeyboardAutoStart.requestFirstEntryAutoStart()
 
                 AppLog.i(
@@ -614,7 +587,7 @@ class QuickSwitchService : Service() {
                     toast(if (goingWhisper) "Speech keyboard ON" else "Default keyboard restored")
                     return
                 } catch (e: SecurityException) {
-                    // no WRITE_SECURE_SETTINGS - system picker handles it silently
+
                 }
             }
             (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showInputMethodPicker()
@@ -627,7 +600,7 @@ class QuickSwitchService : Service() {
         recActive = false
         MicSessionManager.release(MicOwner.BUBBLE)
         handler.removeCallbacksAndMessages(null)
-        // stop only - the shared mic stays healthy for the keyboard service
+
         try { activeBubbleRecorder?.stop() } catch (_: Exception) {}
         activeBubbleRecorder = null
         try { bubble?.let { wm?.removeView(it) } } catch (_: Exception) {}
@@ -643,7 +616,7 @@ class QuickSwitchService : Service() {
             "STOP" -> { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
             "STOP_REC" -> {
                 if (recActive) { stopRec(); toast("Recording stopped - processing") }
-                else refreshNotif(true) // stale "Recording Xs" notification - rebuild to current state
+                else refreshNotif(true)
             }
             "SWITCH_IME" -> toggleIme()
             else -> {

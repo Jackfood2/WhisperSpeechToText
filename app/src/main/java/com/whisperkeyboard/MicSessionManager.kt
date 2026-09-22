@@ -6,7 +6,8 @@ enum class MicOwner {
     NONE,
     KEYBOARD,
     BUBBLE,
-    MEETING
+    MEETING,
+    RECOGNITION_SERVICE
 }
 
 object MicSessionManager {

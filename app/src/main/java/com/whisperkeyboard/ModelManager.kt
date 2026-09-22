@@ -9,13 +9,15 @@ import java.net.URL
 object ModelManager {
 
     private fun urlFor(model: String): String {
-        return when (model) {
-            "tiny" -> "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
-            "base" -> "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
-            "small" -> "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
-            "medium" -> "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"
-            else -> "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+        val fileName = when (model) {
+            "tiny" -> "ggml-tiny.bin"
+            "base" -> "ggml-base.bin"
+            "small" -> "ggml-small.bin"
+            "medium" -> "ggml-medium.bin"
+            else -> throw IllegalArgumentException("Unsupported model: $model")
         }
+
+        return "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$fileName"
     }
 
     fun modelsDir(ctx: Context): File {
@@ -28,20 +30,14 @@ object ModelManager {
         return File(modelsDir(ctx), "ggml-$model.bin")
     }
 
-    /** Official ggml sizes (bytes, HuggingFace ggerganov/whisper.cpp). */
     fun expectedBytes(model: String): Long = when (model) {
-        "tiny" -> 77_691_713L      // ~74 MB
-        "base" -> 147_951_465L     // ~141 MB
-        "small" -> 487_601_967L    // ~465 MB
-        "medium" -> 1_533_763_059L // ~1.43 GB
+        "tiny" -> 77_691_713L
+        "base" -> 147_951_465L
+        "small" -> 487_601_967L
+        "medium" -> 1_533_763_059L
         else -> 0L
     }
 
-    /**
-     * A download counts as complete only if it reached ~its official size.
-     * The old >1MB check blessed truncated files (e.g. a 426/465MB small),
-     * which then failed at native load with a cryptic "1 failed".
-     */
     fun isComplete(ctx: Context, model: String): Boolean {
         return try {
             val f = modelFile(ctx, model)
@@ -52,7 +48,6 @@ object ModelManager {
         } catch (_: Exception) { false }
     }
 
-    /** Human shortfall description, or null when complete/missing. */
     fun shortfall(ctx: Context, model: String): String? {
         return try {
             val f = modelFile(ctx, model)
@@ -72,70 +67,103 @@ object ModelManager {
     }
 
     fun download(ctx: Context, model: String, onProgress: (Int, String) -> Unit) {
-        val outFile = modelFile(ctx, model)
+        val finalFile = modelFile(ctx, model)
         if (isComplete(ctx, model)) {
             onProgress(100, "Already downloaded: ggml-${model}.bin")
             return
         }
-        // Drop any truncated previous attempt so it can never pass as complete.
-        try { if (outFile.exists()) outFile.delete() } catch (_: Exception) {}
+        val partialFile = File(
+            finalFile.parentFile,
+            "${finalFile.name}.part"
+        )
 
-        val url = URL(urlFor(model))
-        val conn = url.openConnection() as HttpURLConnection
-        conn.connectTimeout = 30000
-        conn.readTimeout = 60000
-        conn.connect()
+        runCatching { partialFile.delete() }
 
-        val totalSize = conn.contentLengthLong
-        val inputStream = conn.inputStream
-        val outputStream = FileOutputStream(outFile)
-
-        val buffer = ByteArray(128 * 1024)
-        var totalRead = 0L
-        var lastProgress = 0
+        val conn = URL(urlFor(model))
+            .openConnection() as HttpURLConnection
 
         try {
-            while (true) {
-                val bytesRead = inputStream.read(buffer)
-                if (bytesRead == -1) break
-                outputStream.write(buffer, 0, bytesRead)
-                totalRead += bytesRead
+            conn.instanceFollowRedirects = true
+            conn.connectTimeout = 30_000
+            conn.readTimeout = 60_000
+            conn.requestMethod = "GET"
+            conn.connect()
 
-                if (totalSize > 0) {
-                    val progress = (totalRead * 100 / totalSize).toInt()
-                    if (progress != lastProgress) {
-                        lastProgress = progress
-                        val sizeMB = totalRead / 1024 / 1024
-                        val totalMB = totalSize / 1024 / 1024
-                        onProgress(progress, "Downloading $model: ${progress}% (${sizeMB}/${totalMB} MB)")
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                throw java.io.IOException(
+                    "Download failed with HTTP $code"
+                )
+            }
+
+            val totalSize = conn.contentLengthLong
+
+            conn.inputStream.buffered().use { input ->
+                FileOutputStream(partialFile).buffered().use { output ->
+                    val buffer = ByteArray(128 * 1024)
+                    var totalRead = 0L
+                    var lastProgress = -1
+
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+
+                        output.write(buffer, 0, count)
+                        totalRead += count
+
+                        if (totalSize > 0L) {
+                            val progress =
+                                ((totalRead * 100L) / totalSize)
+                                    .coerceIn(0L, 100L)
+                                    .toInt()
+
+                            if (progress != lastProgress) {
+                                lastProgress = progress
+
+                                onProgress(
+                                    progress,
+                                    "Downloading $model: $progress% " +
+                                        "(${totalRead / 1024 / 1024}/" +
+                                        "${totalSize / 1024 / 1024} MB)"
+                                )
+                            }
+                        }
                     }
-                } else {
-                    val sizeMB = totalRead / 1024 / 1024
-                    onProgress(0, "Downloading $model: ${sizeMB} MB received...")
+
+                    output.flush()
                 }
             }
-        } finally {
-            outputStream.close()
-            inputStream.close()
-            conn.disconnect()
-        }
 
-            // Verify file reached its official size (a stall/truncate must NOT pass)
-        val exp = expectedBytes(model)
-        if (!outFile.exists() || (exp > 0 && outFile.length() < (exp * 0.98).toLong())) {
-            val got = if (outFile.exists()) "${outFile.length() / 1024 / 1024} MB" else "nothing"
-            outFile.delete()
-            throw RuntimeException("Download incomplete (got $got, expected ${exp / 1024 / 1024} MB) - retry on stable WiFi")
-        }
-        if (exp <= 0 && (!outFile.exists() || outFile.length() < 1_000_000)) {
-            outFile.delete()
-            throw RuntimeException("Download failed or file incomplete")
+            val expected = expectedBytes(model)
+            val actual = partialFile.length()
+
+            if (
+                expected > 0L &&
+                actual < (expected * 0.98).toLong()
+            ) {
+                throw java.io.IOException(
+                    "Incomplete download: " +
+                        "${actual / 1024 / 1024} MB received"
+                )
+            }
+
+            if (!partialFile.renameTo(finalFile)) {
+                partialFile.copyTo(finalFile, overwrite = true)
+                partialFile.delete()
+            }
+
+            onProgress(
+                100,
+                "Downloaded: ${finalFile.name}"
+            )
+        } catch (e: Exception) {
+            partialFile.delete()
+            throw e
+        } finally {
+            conn.disconnect()
         }
     }
 
-    // ---------- Moonshine v2 (.ort bundles, auto-downloaded by moonshine-voice) ----------
-
-    /** Human-readable sizes for Settings UI (official ggml sizes). */
     fun whisperSize(model: String): String = when (model) {
         "tiny" -> "~74 MB"; "base" -> "~141 MB"; "small" -> "~465 MB"; "medium" -> "~1.43 GB"; else -> ""
     }
@@ -144,7 +172,6 @@ object ModelManager {
         "tiny" -> "~34 MB"; "base" -> "~60 MB"; "small" -> "~123 MB"; "medium" -> "~245 MB"; else -> ""
     }
 
-    /** Marker file: real .ort bundles live in moonshine-voice ModelCache (app-private). */
     fun moonshineMarker(ctx: Context, model: String): File {
         return File(modelsDir(ctx), "moonshine-$model.marker")
     }
@@ -169,7 +196,6 @@ object ModelManager {
         }
     }
 
-    /** Download = load via MoonshineEngine (fetches .ort bundles on first run). */
     fun downloadMoonshine(ctx: Context, model: String, onProgress: (Int, String) -> Unit) {
         if (isMoonshineReady(ctx, model) && MoonshineEngine.isLoaded(model)) {
             onProgress(100, "Already downloaded: moonshine-$model")
@@ -185,17 +211,26 @@ object ModelManager {
         onProgress(100, "Ready: moonshine-$model (${moonshineSize(model)})")
     }
 
-    /** Delete whisper .bin files AND moonshine markers (the .ort cache itself is app-private). */
     fun clearAllModels(ctx: Context): Pair<Int, Long> {
-        val dir = modelsDir(ctx)
-        val files = dir.listFiles() ?: emptyArray()
-        var freed = 0L
-        for (f in files) {
-            if (f.name.startsWith("ggml-") || f.name.startsWith("moonshine-")) {
-                freed += f.length()
-                f.delete()
+        val files = modelsDir(ctx).listFiles() ?: return 0 to 0L
+
+        var deletedCount = 0
+        var freedBytes = 0L
+
+        for (file in files) {
+            if (
+                file.name.startsWith("ggml-") ||
+                file.name.startsWith("moonshine-")
+            ) {
+                val size = file.length()
+
+                if (file.delete()) {
+                    deletedCount++
+                    freedBytes += size
+                }
             }
         }
-        return Pair(files.size, freed)
+
+        return deletedCount to freedBytes
     }
 }

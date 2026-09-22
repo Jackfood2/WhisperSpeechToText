@@ -4,13 +4,13 @@
         name="Theme.WhisperKeyboard"
         parent="Theme.Material3.DayNight.NoActionBar">
 
-        <item name="colorPrimary">#6C5CE7</item>
-        <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="colorPrimaryContainer">#E9E3FF</item>
-        <item name="colorOnPrimaryContainer">#21105C</item>
+        <item name="colorPrimary">#7E6BD8</item>
+        <item name="colorOnPrimary">#121212</item>
+        <item name="colorPrimaryContainer">#2A2350</item>
+        <item name="colorOnPrimaryContainer">#E9E3FF</item>
 
-        <item name="colorSecondary">#625B71</item>
-        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="colorSecondary">#8E8AA0</item>
+        <item name="colorOnSecondary">#121212</item>
 
         <item name="android:statusBarColor">
             ?attr/colorSurface
@@ -21,7 +21,7 @@
         </item>
 
         <item name="android:windowLightStatusBar">
-            true
+            false
         </item>
     </style>
 </resources>

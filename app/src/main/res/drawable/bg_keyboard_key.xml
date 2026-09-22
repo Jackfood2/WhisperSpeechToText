@@ -4,7 +4,7 @@
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
             <corners android:radius="10dp"/>
-            <solid android:color="#34344A"/>
+            <solid android:color="@color/keyboard_key_pressed"/>
             <padding
                 android:left="8dp"
                 android:top="6dp"
@@ -16,7 +16,7 @@
     <item>
         <shape android:shape="rectangle">
             <corners android:radius="10dp"/>
-            <solid android:color="#45455F"/>
+            <solid android:color="@color/keyboard_key_rest"/>
             <padding
                 android:left="8dp"
                 android:top="6dp"

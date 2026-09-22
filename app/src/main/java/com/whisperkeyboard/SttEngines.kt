@@ -3,15 +3,6 @@ package com.whisperkeyboard
 import android.content.Context
 import java.io.File
 
-/**
- * Dual-pipeline dispatcher: Whisper (multilingual, ggml .bin via JNI) and
- * Moonshine v2 (English, fast, .ort via moonshine-voice AAR).
- *
- * The engine + model are chosen ONLY in the app Settings page ("engine" and
- * "model" prefs). The keyboard never switches - it shows a read-only yellow
- * badge (see WhisperKeyboardService.refreshAllButtons). Jobs capture the
- * engine at enqueue time, so switching mid-queue never corrupts in-flight work.
- */
 object SttEngines {
 
     const val WHISPER = "whisper"
@@ -20,13 +11,44 @@ object SttEngines {
     private fun prefs(ctx: Context?) =
         ctx?.getSharedPreferences("whisper", Context.MODE_PRIVATE)
 
+    fun normalizeEngine(engine: String?): String {
+        return when (engine) {
+            MOONSHINE -> MOONSHINE
+            WHISPER -> WHISPER
+            else -> WHISPER
+        }
+    }
+
+    private val supportedModels =
+        setOf("tiny", "base", "small", "medium")
+
+    fun normalizeModel(model: String?): String {
+        return model
+            ?.takeIf { it in supportedModels }
+            ?: ""
+    }
+
     fun current(ctx: Context?): String =
-        prefs(ctx)?.getString("engine", WHISPER) ?: WHISPER
+        normalizeEngine(
+            prefs(ctx)?.getString("engine", WHISPER)
+        )
+
+    fun automaticThreadCount(): Int {
+        val cores =
+            Runtime.getRuntime()
+                .availableProcessors()
+                .coerceAtLeast(1)
+
+        return when {
+            cores >= 8 -> 6
+            cores >= 4 -> 4
+            else -> cores
+        }
+    }
 
     fun model(ctx: Context?): String =
         prefs(ctx)?.getString("model", "small") ?: "small"
 
-    /** Moonshine models are English-only: force "en" so jobs never fail on lang. */
     fun jobLang(ctx: Context?): String {
         if (current(ctx) == MOONSHINE) return "en"
         return prefs(ctx)?.getString("lang", "auto") ?: "auto"
@@ -38,7 +60,6 @@ object SttEngines {
         return "${e.uppercase()} · ${m.ifEmpty { "—" }}"
     }
 
-    /** Short user-facing reason why recording is blocked, or null when ready. */
     fun describeMissing(ctx: Context, engine: String, model: String): String? {
         if (model.isEmpty()) return "no model selected - pick one in Settings"
         if (isReady(ctx, engine, model)) return null
@@ -57,29 +78,53 @@ object SttEngines {
     }
 
     fun ensureModel(ctx: Context, engine: String, model: String, lang: String): Boolean {
-        // RAM hygiene: evict the OTHER engine first so whisper-medium (769MB) and a
-        // moonshine model never sit resident together. unloadIfIdle is busy-guarded,
-        // so an engine mid-transcription is left alone (its queued jobs self-heal).
-        if (engine == MOONSHINE) {
-            try { WhisperEngine.unloadIfIdle() } catch (_: Exception) {}
-        } else {
-            try { MoonshineEngine.unloadIfIdle() } catch (_: Exception) {}
+        val normalizedEngine = normalizeEngine(engine)
+        val normalizedModel = normalizeModel(model)
+
+        val loaded = when (normalizedEngine) {
+            MOONSHINE -> {
+                MoonshineEngine.applyThreadPref(ctx)
+                MoonshineEngine.ensureModel(
+                    ctx.applicationContext,
+                    normalizedModel,
+                    "en"
+                )
+            }
+
+            else -> {
+                if (!ModelManager.isComplete(ctx, normalizedModel)) {
+                    false
+                } else {
+                    val file =
+                        ModelManager.modelFile(ctx, normalizedModel)
+
+                    if (
+                        WhisperEngine.isLoaded(
+                            file.absolutePath
+                        )
+                    ) {
+                        true
+                    } else {
+                        WhisperEngine.applyThreadPref(ctx)
+                        WhisperEngine.ensureModel(
+                            file.absolutePath
+                        )
+                    }
+                }
+            }
         }
-        val ok = if (engine == MOONSHINE) {
-            MoonshineEngine.applyThreadPref(ctx)
-            MoonshineEngine.ensureModel(ctx, model, "en")
-        } else {
-            if (!ModelManager.isComplete(ctx, model)) return false
-            val mf = ModelManager.modelFile(ctx, model)
-            if (WhisperEngine.isLoaded(mf.absolutePath)) return true
-            WhisperEngine.applyThreadPref(ctx)
-            WhisperEngine.ensureModel(mf.absolutePath)
+
+        if (loaded) {
+            if (normalizedEngine == MOONSHINE) {
+                WhisperEngine.unloadIfIdle()
+            } else {
+                MoonshineEngine.unloadIfIdle()
+            }
+
+            ProcessingService.notifyActivity()
         }
-        // Guarantee the idle-unloader is armed whenever a model is pinned in RAM.
-        // (Whisper's transcribe self-heal path reloads without notifying, which used
-        // to leave models pinned forever when the service wasn't already running.)
-        if (ok) ProcessingService.notifyActivity()
-        return ok
+
+        return loaded
     }
 
     fun isLoaded(ctx: Context, engine: String, model: String): Boolean {
@@ -96,7 +141,6 @@ object SttEngines {
         }
     }
 
-    /** True while either native engine is inside a transcription. */
     fun busy(): Boolean = WhisperEngine.isBusy() || MoonshineEngine.isBusy()
 
     fun cancelAll() {
@@ -104,18 +148,16 @@ object SttEngines {
         try { MoonshineEngine.cancelCurrent() } catch (_: Exception) {}
     }
 
-    /** Unload idle engines (each guards its own busy state). */
     fun unloadIdle() {
         try { WhisperEngine.unloadIfIdle() } catch (_: Exception) {}
         try { MoonshineEngine.unloadIfIdle() } catch (_: Exception) {}
-        // Model session ended: next normal -> Speech switch auto-records again.
+
         try { KeyboardAutoStart.reset() } catch (_: Exception) {}
     }
 
     fun loadedModel(): String? =
         WhisperEngine.loadedModel() ?: MoonshineEngine.loadedModel()
 
-    /** Stats keys are engine-qualified: whisper_small vs moonshine_small never mix. */
     fun statsKey(engine: String, model: String) = "${engine}_$model"
 
     fun defaultRatio(engine: String, model: String): Double {

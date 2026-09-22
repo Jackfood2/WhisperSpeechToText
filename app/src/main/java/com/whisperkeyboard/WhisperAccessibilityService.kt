@@ -6,30 +6,81 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.view.accessibility.AccessibilityNodeInfo
 
-/**
- * Enabled by the user in Settings > Accessibility. Lets transcribed text be
- * pasted into ANY focused field even when another keyboard is in use.
- */
 class WhisperAccessibilityService : AccessibilityService() {
 
     companion object {
         @Volatile private var instance: WhisperAccessibilityService? = null
         fun isReady(): Boolean = instance != null
 
-        /** Paste text into the currently focused editable node. Returns false if unavailable. */
         fun paste(text: String): Boolean {
             val svc = instance ?: return false
             return try {
-                val root = svc.rootInActiveWindow ?: findFromWindows(svc) ?: return false
-                val node = findEditable(root) ?: return false
+                val node = findTargetNode(svc) ?: return false
                 val cm = svc.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("whisper", text))
-                node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-                node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+                val previousClip =
+                    runCatching {
+                        cm.primaryClip
+                    }.getOrNull()
+
+                val focused = node.performAction(
+                    AccessibilityNodeInfo.ACTION_FOCUS
+                )
+
+                if (!focused && !node.isFocused) {
+                    return false
+                }
+
+                cm.setPrimaryClip(
+                    ClipData.newPlainText(
+                        "whisper",
+                        text
+                    )
+                )
+
+                val pasted = node.performAction(
+                    AccessibilityNodeInfo.ACTION_PASTE
+                )
+
+                if (previousClip != null) {
+                    if (android.os.Build.VERSION.SDK_INT >= 28) {
+                        svc.mainExecutor.execute {
+                            runCatching {
+                                cm.setPrimaryClip(previousClip)
+                            }
+                        }
+                    } else {
+                        runCatching {
+                            cm.setPrimaryClip(previousClip)
+                        }
+                    }
+                }
+
+                pasted
             } catch (e: Exception) {
                 AppLog.w("A11y", "paste failed: ${e.message}")
                 false
             }
+        }
+
+        private fun findTargetNode(
+            service: WhisperAccessibilityService
+        ): AccessibilityNodeInfo? {
+            val root =
+                service.rootInActiveWindow
+                    ?: return findFromWindows(service)
+
+            val focused = root.findFocus(
+                AccessibilityNodeInfo.FOCUS_INPUT
+            )
+
+            if (
+                focused?.isEditable == true &&
+                focused.isEnabled
+            ) {
+                return focused
+            }
+
+            return findEditable(root)
         }
 
         private fun findFromWindows(svc: WhisperAccessibilityService): AccessibilityNodeInfo? {
@@ -57,7 +108,9 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        instance = this
+        synchronized(Companion) {
+            instance = this
+        }
         AppLog.i("A11y", "accessibility service connected - cross-keyboard typing enabled")
     }
 
@@ -66,7 +119,11 @@ class WhisperAccessibilityService : AccessibilityService() {
     override fun onInterrupt() {}
 
     override fun onDestroy() {
-        instance = null
+        synchronized(Companion) {
+            if (instance === this) {
+                instance = null
+            }
+        }
         AppLog.i("A11y", "accessibility service disconnected")
         super.onDestroy()
     }

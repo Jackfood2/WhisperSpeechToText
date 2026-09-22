@@ -8,22 +8,42 @@ add_definitions(-D_GNU_SOURCE)
 # Use whisper.cpp's own build system
 set(WHISPER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/whisper.cpp)
 
-# Build ggml and whisper as subdirectories (handles all platform quirks automatically)
-option(GGML_CCACHE    "" OFF)
-option(GGML_HIP       "" OFF)
-option(GGML_VULKAN    "" OFF)
-option(GGML_OPENCL    "" OFF)
-option(GGML_CUDA      "" OFF)
-option(GGML_METAL     "" OFF)
-option(GGML_SYCL      "" OFF)
-option(GGML_RPC       "" OFF)
-option(BUILD_SHARED_LIBS "" OFF)
-option(WHISPER_BUILD_TESTS    "" OFF)
-option(WHISPER_BUILD_EXAMPLES "" OFF)
+if(
+    NOT EXISTS
+    "${WHISPER_DIR}/CMakeLists.txt"
+)
+    message(
+        FATAL_ERROR
+        "whisper.cpp source tree not found at ${WHISPER_DIR}"
+    )
+endif()
 
-# Force CPU-only backend
+if(
+    NOT EXISTS
+    "${CMAKE_CURRENT_SOURCE_DIR}/whisper_jni.c"
+)
+    message(
+        FATAL_ERROR
+        "whisper_jni.c not found"
+    )
+endif()
+
+# Reproducible CPU-only build: FORCE cache values so stale build
+# folders cannot silently enable GPU/backends or tests/examples.
+set(GGML_CCACHE OFF CACHE BOOL "" FORCE)
+set(GGML_HIP OFF CACHE BOOL "" FORCE)
+set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+set(GGML_OPENCL OFF CACHE BOOL "" FORCE)
+set(GGML_CUDA OFF CACHE BOOL "" FORCE)
+set(GGML_METAL OFF CACHE BOOL "" FORCE)
+set(GGML_SYCL OFF CACHE BOOL "" FORCE)
+set(GGML_RPC OFF CACHE BOOL "" FORCE)
 set(GGML_CPU ON CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
 # Add whisper.cpp as subdirectory - this builds both ggml and whisper
 add_subdirectory(${WHISPER_DIR} ${CMAKE_BINARY_DIR}/whisper.cpp EXCLUDE_FROM_ALL)
@@ -51,4 +71,22 @@ target_link_libraries(whisper_jni
     ${LOG_LIB}
 )
 
-target_compile_options(whisper_jni PRIVATE -O3)
+set_target_properties(
+    whisper_jni
+    PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
+
+target_compile_options(
+    whisper_jni
+    PRIVATE
+    $<$<CONFIG:Release>:-O3>
+    $<$<CONFIG:Debug>:-O0>
+    $<$<CONFIG:Debug>:-g>
+    -Wall
+    -Wextra
+    -Wformat=2
+    -Wshadow
+)

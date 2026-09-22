@@ -1,4 +1,4 @@
-﻿package com.whisperkeyboard
+package com.whisperkeyboard
 
 import android.Manifest
 import android.content.BroadcastReceiver
@@ -28,20 +28,15 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class WhisperKeyboardService : InputMethodService() {
 
-    /** TAG + state shared with QuickSwitchService / ImeRecordService */
     companion object {
         const val TAG = "WhisperIME"
         @Volatile var activeIC: android.view.inputmethod.InputConnection? = null
         @Volatile var capsFn: ((String) -> String)? = null
-        /** Invoked by the recording notification's Stop action (works from lock screen). */
+
         @Volatile var stopHook: (() -> Unit)? = null
-        /** True while the IME itself is capturing audio (bubble must not steal the mic). */
+
         @Volatile var imeRecording = false
 
-        /**
-         * Set by QuickSwitchService when entering the keyboard
-         * from another keyboard.
-         */
         @Volatile
         var autoStartRequested = false
 
@@ -51,11 +46,16 @@ class WhisperKeyboardService : InputMethodService() {
         const val MAX_CHUNK_MS = 60_000L
         const val FIRST_SESSION_SILENCE_MS = 2_000L
         const val CHUNK_SILENCE_MS = 2_000L
+        private const val FIRST_SESSION_NO_SPEECH_MS =
+            10_000L
+
+        private const val MAX_IN_MEMORY_AUDIO_BYTES =
+            32_000 * 5 * 60
     }
 
     private val isRecording = AtomicBoolean(false)
     private var activeRecorder: AudioRecord? = null
-    private var recordThread: Thread? = null
+    @Volatile private var recordThread: Thread? = null
     private var rootView: View? = null
     private var tvStatus: TextView? = null
     private var tvEngine: TextView? = null
@@ -79,8 +79,19 @@ class WhisperKeyboardService : InputMethodService() {
     private val backspaceHandler = Handler(Looper.getMainLooper())
     private val enterHandler = Handler(Looper.getMainLooper())
     private var outstandingListener: (() -> Unit)? = null
+    private var listenersRegistered = false
 
-    // Hold-to-delete WORDS, accelerating (400ms -> 80ms per word)
+    private fun registerListenersOnce() {
+        if (listenersRegistered) return
+
+        outstandingListener = { handler.post { updateOutstandingRow() } }
+        OutstandingStore.register(outstandingListener!!)
+        TranscriptionQueue.addListener(pqListener)
+        prefs().registerOnSharedPreferenceChangeListener(prefsListener)
+
+        listenersRegistered = true
+    }
+
     @Volatile private var bsWordDelay = 400f
     private val backspaceWordRepeater = object : Runnable {
         override fun run() {
@@ -90,22 +101,95 @@ class WhisperKeyboardService : InputMethodService() {
         }
     }
 
+    private fun enterRepeatAction(): Boolean {
+        val action =
+            currentInputEditorInfo?.imeOptions
+                ?.and(
+                    android.view.inputmethod.EditorInfo
+                        .IME_MASK_ACTION
+                )
+                ?: android.view.inputmethod.EditorInfo
+                    .IME_ACTION_NONE
+
+        return action ==
+            android.view.inputmethod.EditorInfo.IME_ACTION_NONE ||
+            action ==
+            android.view.inputmethod.EditorInfo.IME_ACTION_UNSPECIFIED
+    }
+
     private val enterRepeater = object : Runnable {
         override fun run() {
+            if (!enterRepeatAction()) return
             try { currentInputConnection?.commitText("\n", 1) } catch (_: Exception) {}
             enterHandler.postDelayed(this, 140)
         }
     }
 
     private fun deleteLastWord() {
-        val ic = currentInputConnection ?: return
-        val before = ic.getTextBeforeCursor(48, 0) ?: return
-        val trimmed = before.trimEnd()
-        val n = when {
-            trimmed.isEmpty() -> before.length.coerceAtLeast(1)
-            else -> { val idx = trimmed.lastIndexOf(' '); before.length - (if (idx < 0) 0 else idx + 1) }
-        }.coerceIn(1, 48)
-        ic.deleteSurroundingText(n, 0)
+        val connection =
+            currentInputConnection ?: return
+
+        val before =
+            connection.getTextBeforeCursor(64, 0)
+                ?.toString()
+                ?: return
+
+        if (before.isEmpty()) return
+
+        var deleteCount = 0
+        var index = before.lastIndex
+
+        while (
+            index >= 0 &&
+            before[index].isWhitespace()
+        ) {
+            deleteCount++
+            index--
+        }
+
+        while (
+            index >= 0 &&
+            !before[index].isWhitespace()
+        ) {
+            deleteCount++
+            index--
+        }
+
+        if (deleteCount > 0) {
+            connection.deleteSurroundingText(
+                deleteCount,
+                0
+            )
+        }
+    }
+
+    private fun performEnter() {
+        val connection =
+            currentInputConnection ?: return
+
+        val action =
+            currentInputEditorInfo?.imeOptions
+                ?.and(
+                    android.view.inputmethod.EditorInfo
+                        .IME_MASK_ACTION
+                )
+                ?: android.view.inputmethod.EditorInfo
+                    .IME_ACTION_NONE
+
+        val handled = when (action) {
+            android.view.inputmethod.EditorInfo.IME_ACTION_GO,
+            android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH,
+            android.view.inputmethod.EditorInfo.IME_ACTION_SEND,
+            android.view.inputmethod.EditorInfo.IME_ACTION_NEXT,
+            android.view.inputmethod.EditorInfo.IME_ACTION_DONE ->
+                connection.performEditorAction(action)
+
+            else -> false
+        }
+
+        if (!handled) {
+            connection.commitText("\n", 1)
+        }
     }
 
     private val screenOffReceiver = object : BroadcastReceiver() {
@@ -124,7 +208,6 @@ class WhisperKeyboardService : InputMethodService() {
         }
     }
 
-    // ---- chunked transcription config ----
     override fun onCreate() {
         super.onCreate()
 
@@ -165,9 +248,6 @@ class WhisperKeyboardService : InputMethodService() {
         }.apply { isDaemon = true; name = "model-preload-$from"; start() }
     }
 
-    // NOTE: model unloading follows STRICTLY the user's "Unload model when idle" timeout
-    // (ProcessingService enforces it, incl. lock screen). No other triggers.
-
     override fun onCreateInputView(): View {
         Log.i(TAG, "onCreateInputView")
         capsFn = { applyCapsMode(it) }
@@ -195,11 +275,17 @@ class WhisperKeyboardService : InputMethodService() {
         btnMicCircle?.setOnClickListener { if (!isRecording.get()) startRecording() else stopRecordingAndTranscribe() }
         btnCloseKeyboard?.setOnClickListener {
             val wasRecording = isRecording.get()
-            if (wasRecording) stopRecordingAndTranscribe() // stop mic NOW; chunks keep processing
+            if (wasRecording) stopRecordingAndTranscribe()
             Toast.makeText(this, if (wasRecording || TranscriptionQueue.isActive()) "Stopped - text will still be typed in" else "Closed", Toast.LENGTH_SHORT).show()
-            try { if (!switchToPreviousInputMethod()) requestHideSelf(0) } catch (_: Exception) { try { requestHideSelf(0) } catch (_: Exception) {} }
+            try {
+                if (Build.VERSION.SDK_INT >= 28) {
+                    if (!switchToPreviousInputMethod()) requestHideSelf(0)
+                } else {
+                    requestHideSelf(0)
+                }
+            } catch (_: Exception) { try { requestHideSelf(0) } catch (_: Exception) {} }
         }
-        // Gear opens the APP settings - the app is the single source of truth
+
         btnKeyboardGear?.setOnClickListener {
             try {
                 val i = Intent(this, SettingsActivity::class.java)
@@ -207,7 +293,7 @@ class WhisperKeyboardService : InputMethodService() {
                 startActivity(i)
             } catch (_: Exception) {}
         }
-        // Space: inserts a single space into the focused field
+
         btnSpace?.setOnClickListener {
             try {
                 currentInputConnection?.commitText(" ", 1)
@@ -215,64 +301,60 @@ class WhisperKeyboardService : InputMethodService() {
                 AppLog.w(TAG, "Space failed: ${e.message}")
             }
         }
-        // Backspace: open app - deletes ONE character; hold deletes WORDS, accelerating over time
-        btnBackspace?.setOnClickListener { try { currentInputConnection?.deleteSurroundingText(1, 0) } catch (_: Exception) {} }
-        btnBackspace?.setOnTouchListener { v, ev ->
+
+        btnBackspace?.setOnClickListener(null)
+        btnBackspace?.setOnTouchListener { _, ev ->
             when (ev.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
                     try { currentInputConnection?.deleteSurroundingText(1, 0) } catch (_: Exception) {}
                     bsWordDelay = 400f
                     backspaceHandler.postDelayed(backspaceWordRepeater, 380)
-                    v.performClick()
                     true
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                     backspaceHandler.removeCallbacks(backspaceWordRepeater)
                     true
                 }
-                else -> false
+                else -> true
             }
         }
-        // Enter: tap inserts newline; hold repeats
-        btnEnter?.setOnClickListener {
-            try {
-                val ic = currentInputConnection
-                // Prefer commitText; fallback to key event for single-line fields
-                if (ic != null) {
-                    val ok = ic.commitText("\n", 1)
-                    if (!ok) ic.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER))
-                }
-            } catch (_: Exception) {}
-        }
-        btnEnter?.setOnTouchListener { v, ev ->
+
+        btnEnter?.setOnClickListener(null)
+        btnEnter?.setOnTouchListener { _, ev ->
             when (ev.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
-                    try { currentInputConnection?.commitText("\n", 1) } catch (_: Exception) {}
+                    try { performEnter() } catch (_: Exception) {}
                     enterHandler.postDelayed(enterRepeater, 380)
-                    v.performClick()
                     true
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                     enterHandler.removeCallbacks(enterRepeater)
                     true
                 }
-                else -> false
+                else -> true
             }
         }
 
-        // Outstanding transcripts held from lock screen etc. - insert one per tap, oldest first
-        outstandingListener = { handler.post { updateOutstandingRow() } }
-        OutstandingStore.register(outstandingListener!!)
+        registerListenersOnce()
         btnTypeOutstanding?.setOnClickListener {
-            val t = OutstandingStore.popOldest(this)
-            if (t != null) {
-                val capped = capsFn?.invoke(t) ?: t
-                try { currentInputConnection?.commitText("$capped ", 1) } catch (_: Exception) {}
-                val left = OutstandingStore.count(this)
-                Toast.makeText(this, if (left > 0) "Typed - $left more pending" else "Typed - all done", Toast.LENGTH_SHORT).show()
-                AppLog.i(TAG, "typed outstanding: ${t.take(50)}")
-                updateOutstandingRow()
+            val ic = currentInputConnection ?: activeIC
+            if (ic == null) {
+                Toast.makeText(this, "No editable field is focused", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
             }
+            val t = OutstandingStore.popOldest(this) ?: return@setOnClickListener
+            val capped = capsFn?.invoke(t) ?: t
+            val inserted = runCatching { ic.commitText("$capped ", 1) }.getOrDefault(false)
+            if (!inserted) {
+
+                OutstandingStore.requeueFront(this, t)
+                Toast.makeText(this, "Unable to insert transcript", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            val left = OutstandingStore.count(this)
+            Toast.makeText(this, if (left > 0) "Typed - $left more pending" else "Typed - all done", Toast.LENGTH_SHORT).show()
+            AppLog.i(TAG, "typed outstanding: ${t.take(50)}")
+            updateOutstandingRow()
         }
         btnDiscardOutstanding?.setOnClickListener {
             if (OutstandingStore.discardOldest(this)) {
@@ -292,7 +374,7 @@ class WhisperKeyboardService : InputMethodService() {
             updateStatus("Force stop requested...")
             progressBar?.progress = 0; tvPct?.text = "0%"
             updateProcessingRow(); updateQueueBadge()
-            // confirm once the native abort has actually landed
+
             fun confirmStop(attempt: Int) {
                 if (!TranscriptionQueue.isActive() && !SttEngines.busy()) {
                     updateStatus("Processing stopped")
@@ -304,8 +386,7 @@ class WhisperKeyboardService : InputMethodService() {
             handler.postDelayed({ confirmStop(0) }, 150)
         }
 
-        TranscriptionQueue.addListener(pqListener)
-        prefs().registerOnSharedPreferenceChangeListener(prefsListener)
+        registerListenersOnce()
         refreshAllButtons()
         updateStatus("Tap the mic and speak")
         progressBar?.progress = TranscriptionQueue.progress()
@@ -338,7 +419,7 @@ class WhisperKeyboardService : InputMethodService() {
                     val (cur, total) = TranscriptionQueue.batchPosition()
                     if (pct in 1..99) tvStatus?.text = "Transcribing chunk... $cur/$total ($pct%)"
                 } else if (wasActive) {
-                    // just finished - stop showing stale "Transcribing..."
+
                     tvStatus?.text = if (isRecording.get()) "Listening - text appears as you pause" else "All chunks processed"
                     tvPct?.text = "0%"
                     progressBar?.progress = 0
@@ -350,12 +431,11 @@ class WhisperKeyboardService : InputMethodService() {
 
     private fun refreshAllButtons() {
         try { setCircleVisual(isRecording.get()) } catch (_: Exception) {}
-        // Yellow engine badge: read-only, engine changes ONLY in app Settings
+
         try { tvEngine?.text = SttEngines.badgeText(this) } catch (_: Exception) {}
         updateLabelsRow()
     }
 
-    /** Read-only label of current selections - the app is the source of truth. */
     private fun updateLabelsRow() {
         val p = prefs()
         val chunkS = p.getInt("vad_chunk_silence_ds", 40) / 10f
@@ -379,59 +459,100 @@ class WhisperKeyboardService : InputMethodService() {
     }
 
     private fun setCircleVisual(recording: Boolean) {
-        btnMicCircle?.setImageResource(if (recording) R.drawable.ic_stop else R.drawable.ic_mic)
-        btnMicCircle?.backgroundTintList = android.content.res.ColorStateList.valueOf(
-            if (recording) 0xFFE17055.toInt() else 0xFF00B894.toInt())
+        btnMicCircle?.setImageResource(
+            if (recording) {
+                R.drawable.ic_stop
+            } else {
+                R.drawable.ic_mic
+            }
+        )
+
+        btnMicCircle?.contentDescription =
+            if (recording) {
+                getString(R.string.stop_recording)
+            } else {
+                getString(R.string.start_recording)
+            }
+
+        btnMicCircle?.backgroundTintList =
+            android.content.res.ColorStateList.valueOf(
+                if (recording) {
+                    0xFFE17055.toInt()
+                } else {
+                    0xFF00B894.toInt()
+                }
+            )
     }
 
     private fun applyCapsMode(text: String): String {
-        val mode = getCapsMode()
-        if (mode == "off") return text.lowercase()
-        if (mode == "auto") return text
-        return text.split(Regex("(?<=[.!?])\\s+")).joinToString(" | ") { s ->
-            s.replaceFirstChar { if(it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+        if (getCapsMode() == "off") {
+            return text
+        }
+
+        val connection =
+            currentInputConnection ?: activeIC
+
+        val before =
+            runCatching {
+                connection
+                    ?.getTextBeforeCursor(2, 0)
+                    ?.toString()
+            }.getOrNull().orEmpty()
+
+        val shouldCapitalize =
+            before.isBlank() ||
+                before.trimEnd()
+                    .lastOrNull() in setOf('.', '!', '?', '\n')
+
+        if (!shouldCapitalize) {
+            return text
+        }
+
+        return text.replaceFirstChar {
+            if (it.isLowerCase()) {
+                it.titlecase(Locale.getDefault())
+            } else {
+                it.toString()
+            }
         }
     }
 
     private fun startImeForeground() {
-        // Plain startService (NOT startForegroundService): the holder promotes
-        // itself best-effort. FGS-start would OBLIGATE promotion within ~10s and
-        // crash the whole IME on devices that deny mic-FGS from a keyboard.
+
         try {
             val intent = Intent(this, ImeRecordService::class.java).apply { action = "START" }
             startService(intent)
         } catch (e: Exception) {
-            // holder unavailable - recording still works while the keyboard is visible
+
             AppLog.w(TAG, "ime holder unavailable, continuing without it: ${e.message}")
         }
     }
     private fun stopImeForeground() {
-        try { val intent = Intent(this, ImeRecordService::class.java).apply { action = "STOP" }; startService(intent) } catch (_: Exception) {}
+
+        try { stopService(Intent(this, ImeRecordService::class.java)) } catch (_: Exception) {}
     }
 
-    // ================= chunked recording engine =================
-
-    /**
-     * @param firstSession true for the first normal -> Speech auto-start:
-     * one recording, no intermediate chunks; stops after speech + 2s silence
-     * or at 60s maximum.
-     */
     private fun startRecording(firstSession: Boolean = false) {
         if (isRecording.get()) return
+        if (recordThread?.isAlive == true) {
+            updateStatus("Finishing previous recording...")
+            return
+        }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             updateStatus("Need mic permission - open app"); return
         }
         val selModel = getModel()
         val selEngine = SttEngines.current(this)
+
+        val selLang = SttEngines.jobLang(this)
         if (!SttEngines.isReady(this, selEngine, selModel)) {
             val missing = SttEngines.describeMissing(this, selEngine, selModel) ?: "not downloaded"
             updateStatus("$missing - open app")
-            // No toast when nothing is picked at all (status line suffices, and this
-            // fires on every keyboard show until the user picks a model in Settings).
+
             if (selModel.isNotEmpty()) Toast.makeText(this, "$missing - open the app to fix it", Toast.LENGTH_LONG).show()
             return
         }
-        // model ready but not in memory -> start recording NOW, load concurrently
+
         if (!SttEngines.isLoaded(this, selEngine, selModel)) preloadModel("startRecording")
         if (!MicSessionManager.tryAcquire(MicOwner.KEYBOARD)) {
             updateStatus("Microphone busy")
@@ -446,18 +567,25 @@ class WhisperKeyboardService : InputMethodService() {
         stopHook = { stopRecordingAndTranscribe() }
         Toast.makeText(this, "Recording started", Toast.LENGTH_SHORT).show()
 
-        // NOTE: keyboard sessions type straight into the field - no audio file
-        // is kept (meeting recordings still archive audio next to the TXT).
         recordThread = Thread {
             val pcmChunk = ByteArrayOutputStream()
             var hasVoice = false
-            var lastVoiceTime = System.currentTimeMillis()      // per-chunk (closes chunks)
-            var sessionVoiceTime = System.currentTimeMillis()   // whole-session (auto-stop)
-            var chunkStartMs = System.currentTimeMillis()
+            var lastVoiceTime = android.os.SystemClock.elapsedRealtime()
+            var sessionVoiceTime = android.os.SystemClock.elapsedRealtime()
+            var chunkStartMs = android.os.SystemClock.elapsedRealtime()
             val recordStartMs = chunkStartMs
             val vadOn = isVadOn()
             val chunked = prefs().getBoolean("ime_chunked", true)
             val sessionStopMs = prefs().getInt("vad_stop_silence_s", 10).coerceIn(5, 60) * 1000L
+            val targetChunkMs =
+                prefs().getInt("chunk_target_s", 30).coerceIn(1, 45) * 1_000L
+            val userChunkSilenceMs =
+                prefs().getInt("vad_chunk_silence_ds", 40).coerceIn(5, 100) * 100L
+            val maximumChunkMs =
+                maxOf(
+                    targetChunkMs + 15_000L,
+                    60_000L
+                )
             try {
                 val recorder = AudioUtils.createRecorder(this)
                 activeRecorder = recorder
@@ -468,20 +596,13 @@ class WhisperKeyboardService : InputMethodService() {
                     if (read > 0) {
                         synchronized(pcmChunk) { pcmChunk.write(buffer, 0, read) }
                         val rms = AudioUtils.rms16(buffer, read)
-                        val now = System.currentTimeMillis()
+                        val now = android.os.SystemClock.elapsedRealtime()
                         if (rms > VAD_THRESH) { hasVoice = true; lastVoiceTime = now; sessionVoiceTime = now }
                         val silenceFor = now - lastVoiceTime
                         val durMs = now - chunkStartMs
                         if (firstSession) {
                             val sessionMs = now - recordStartMs
 
-                            /*
-                             * First normal-keyboard to Speech-keyboard switch:
-                             * one recording only, no intermediate chunks.
-                             *
-                             * Stop after speech followed by 2 seconds of silence,
-                             * or force-stop at 60 seconds.
-                             */
                             val stoppedBySilence =
                                 hasVoice &&
                                 silenceFor >= FIRST_SESSION_SILENCE_MS
@@ -489,13 +610,23 @@ class WhisperKeyboardService : InputMethodService() {
                             val stoppedByMaximum =
                                 sessionMs >= MAX_CHUNK_MS
 
-                            if (stoppedBySilence || stoppedByMaximum) {
+                            val noSpeechTimeout =
+                                !hasVoice &&
+                                sessionMs >= FIRST_SESSION_NO_SPEECH_MS
+
+                            if (
+                                stoppedBySilence ||
+                                stoppedByMaximum ||
+                                noSpeechTimeout
+                            ) {
                                 Log.i(
                                     TAG,
                                     "First keyboard session auto-stop: " +
                                         "duration=${sessionMs}ms, " +
                                         "silence=${silenceFor}ms"
                                 )
+
+                                isRecording.set(false)
 
                                 handler.post {
                                     updateStatus(
@@ -505,8 +636,6 @@ class WhisperKeyboardService : InputMethodService() {
                                             "Auto-stopped at 60-second maximum"
                                         }
                                     )
-
-                                    stopRecordingAndTranscribe()
                                 }
 
                                 break
@@ -517,24 +646,25 @@ class WhisperKeyboardService : InputMethodService() {
 
                             val safeSilence =
                                 hasVoice &&
-                                silenceFor >= CHUNK_SILENCE_MS
+                                silenceFor >= userChunkSilenceMs
 
                             val closeChunk =
                                 hasContent &&
                                 chunked &&
                                 (
                                     (
-                                        durMs >= MIN_CHUNK_MS &&
+                                        durMs >= targetChunkMs &&
                                         safeSilence
                                     ) ||
-                                    durMs >= MAX_CHUNK_MS
+                                    durMs >= maximumChunkMs
                                 )
 
                             if (closeChunk) {
                                 flushChunk(
                                     pcmChunk,
                                     selEngine,
-                                    selModel
+                                    selModel,
+                                    selLang
                                 )
 
                                 synchronized(pcmChunk) {
@@ -552,84 +682,206 @@ class WhisperKeyboardService : InputMethodService() {
                                         "silence=${silenceFor}ms"
                                 )
                             }
-                            // whole-session auto stop after long silence (independent of chunk resets)
+
+                            val memoryLimitReached =
+                                pcmChunk.size() >= MAX_IN_MEMORY_AUDIO_BYTES
+
+                            if (memoryLimitReached) {
+                                AppLog.w(
+                                    TAG,
+                                    "Maximum in-memory recording reached; flushing chunk"
+                                )
+
+                                flushChunk(
+                                    pcmChunk,
+                                    selEngine,
+                                    selModel,
+                                    selLang
+                                )
+
+                                synchronized(pcmChunk) {
+                                    pcmChunk.reset()
+                                }
+
+                                chunkStartMs = now
+                                hasVoice = false
+                                lastVoiceTime = now
+                            }
+
                             if (vadOn && now - sessionVoiceTime >= sessionStopMs) {
                                 Log.i(TAG, "session VAD stop after ${now - sessionVoiceTime}ms silence")
+
+                                isRecording.set(false)
+
                                 handler.post {
                                     updateStatus("Auto-stopped after long silence")
                                     Toast.makeText(this@WhisperKeyboardService, "Auto-stopped after ${sessionStopMs / 1000}s of silence", Toast.LENGTH_SHORT).show()
-                                    stopRecordingAndTranscribe()
                                 }
                                 break
                             }
                         }
-                    } else if (read < 0) break
+                        } else if (read < 0) {
+                            if (read == AudioRecord.ERROR_DEAD_OBJECT) {
+                                AppLog.e(TAG, "AudioRecord died (ERROR_DEAD_OBJECT)")
+                            } else {
+                                AppLog.e(TAG, "AudioRecord read error: $read")
+                            }
+                            break
+                        }
                 }
                 try { recorder.stop() } catch (_: Exception) {}
-                // shared recorder stays alive for bubble/next session (never release)
+
                 activeRecorder = null
-                // final partial chunk
-                flushChunk(pcmChunk, selEngine, selModel)
+
+                flushChunk(pcmChunk, selEngine, selModel, selLang)
             } catch (e: Throwable) {
                 AppLog.e(TAG, "recording error: ${e.message}")
                 handler.post { updateStatus("Error: ${e.message}"); Toast.makeText(this@WhisperKeyboardService, "Mic error: ${e.message}", Toast.LENGTH_LONG).show() }
                 try { activeRecorder?.stop() } catch (_: Exception) {}
                 activeRecorder = null
             } finally {
-                MicSessionManager.release(MicOwner.KEYBOARD)
+                isRecording.set(false)
                 imeRecording = false
-                stopHook = null
+
+                activeRecorder = null
+
+                MicSessionManager.release(MicOwner.KEYBOARD)
+
+                if (stopHook != null) {
+                    stopHook = null
+                }
+
                 handler.post {
                     resetMicButton()
+
                     val done =
                         !TranscriptionQueue.isActive() &&
                         TranscriptionQueue.pendingCount() == 0 &&
                         TextRouter.pendingTypingCount() == 0
-                    updateStatus(if (done) "All chunks processed ✓" else "Ready - chunks still processing")
+
+                    updateStatus(
+                        if (done) {
+                            "All chunks processed"
+                        } else {
+                            "Ready - chunks still processing"
+                        }
+                    )
+
                     updateQueueBadge()
                 }
-                handler.postDelayed({ if (!isRecording.get()) stopImeForeground() }, 1500)
+
+                handler.postDelayed(
+                    {
+                        if (!isRecording.get()) {
+                            stopImeForeground()
+                        }
+                    },
+                    1_500L
+                )
+
+                recordThread = null
             }
         }.apply { isDaemon = true; start() }
     }
 
-    /** Write chunk to WAV and enqueue for transcription immediately (pipeline). */
-    private fun flushChunk(buf: ByteArrayOutputStream, engine: String, model: String) {
-        val bytes = synchronized(buf) { buf.toByteArray() }
-        if (bytes.size <= 1800) return
-        val ts = System.currentTimeMillis()
-        val pcm = File(cacheDir, "ime_chunk_$ts.pcm")
-        FileOutputStream(pcm).use { it.write(bytes) }
-        val wav = File(cacheDir, "ime_chunk_$ts.wav")
-        AudioUtils.pcmToWav(pcm, wav)
-        pcm.delete()
-        val lang = SttEngines.jobLang(this)
-        val sec = bytes.size / 32000.0
-        AppLog.i(TAG, "enqueue chunk $engine/$model %.1fs (%d KB)".format(sec, bytes.size / 1024))
-        handler.post { Toast.makeText(this@WhisperKeyboardService, "Chunk %.0fs queued".format(sec), Toast.LENGTH_SHORT).show() }
-        val job = TranscriptionQueue.Job(
-            context = applicationContext,
-            wavFile = wav,
-            model = model,
-            lang = lang,
-            engine = engine,
-            onResult = { text -> TextRouter.route(text.trim()) },
-            onError = { err ->
-                handler.post {
-                    updateStatus("Chunk failed - use Retry Failed")
-                    Toast.makeText(this@WhisperKeyboardService, "A chunk failed - Retry Failed in app settings", Toast.LENGTH_LONG).show()
-                    updateQueueBadge()
-                }
-                AppLog.e(TAG, "chunk failed: $err")
+    private val chunkSequence =
+        java.util.concurrent.atomic.AtomicLong(0L)
+
+    private fun flushChunk(
+        buffer: ByteArrayOutputStream,
+        engine: String,
+        model: String,
+        lang: String
+    ) {
+        val bytes =
+            synchronized(buffer) {
+                buffer.toByteArray()
             }
-        )
-        if (!TranscriptionQueue.enqueue(job)) {
-            AppLog.e(TAG, "Unable to enqueue transcription chunk")
+
+        if (bytes.size <= 1_800) return
+
+        val id =
+            "${System.currentTimeMillis()}" +
+            chunkSequence.incrementAndGet()
+
+        val pcm =
+            File(cacheDir, "ime_chunk$id.pcm")
+
+        val wav =
+            File(cacheDir, "ime_chunk_$id.wav")
+
+        var enqueued = false
+
+        try {
+            FileOutputStream(pcm).use {
+                it.write(bytes)
+            }
+
+            AudioUtils.pcmToWav(pcm, wav)
+
+            if (!wav.isFile || wav.length() <= 44L) {
+                throw java.io.IOException(
+                    "Generated WAV is empty"
+                )
+            }
+
+            val sec = bytes.size / 32000.0
+            AppLog.i(TAG, "enqueue chunk $engine/$model %.1fs (%d KB)".format(sec, bytes.size / 1024))
+            handler.post { Toast.makeText(this@WhisperKeyboardService, "Chunk %.0fs queued".format(sec), Toast.LENGTH_SHORT).show() }
+
+            val job = TranscriptionQueue.Job(
+                context = applicationContext,
+                wavFile = wav,
+                model = model,
+                lang = lang,
+                engine = engine,
+                onResult = { text ->
+                    TextRouter.route(text.trim())
+                },
+                onError = { error ->
+                    AppLog.e(
+                        TAG,
+                        "Chunk failed: $error"
+                    )
+
+                    handler.post {
+                        updateStatus(
+                            "Chunk failed - use Retry Failed"
+                        )
+                        updateQueueBadge()
+                    }
+                }
+            )
+
+            enqueued =
+                TranscriptionQueue.enqueue(job)
+
+            if (!enqueued) {
+                throw IllegalStateException(
+                    "Queue rejected transcription chunk"
+                )
+            }
+        } catch (e: Throwable) {
+            AppLog.e(
+                TAG,
+                "Unable to flush chunk: ${e.message}"
+            )
+
+            handler.post {
+                updateStatus(
+                    "Unable to queue recorded audio"
+                )
+            }
+        } finally {
+            runCatching { pcm.delete() }
+
+            if (!enqueued) {
+                runCatching { wav.delete() }
+            }
         }
         handler.post { updateQueueBadge() }
     }
 
-    /** Strict typing: results are routed (IME -> accessibility paste -> held for resume). */
     private fun stopRecordingAndTranscribe() {
         if (!isRecording.get()) return
         isRecording.set(false)
@@ -666,7 +918,26 @@ class WhisperKeyboardService : InputMethodService() {
     }
 
     private fun updateProcessingRow() {
-        rowProcessing?.visibility = if (TranscriptionQueue.isActive()) View.VISIBLE else View.GONE
+        val hasWork =
+            TranscriptionQueue.pendingCount() > 0
+
+        rowProcessing?.visibility =
+            if (hasWork) {
+                View.VISIBLE
+            } else {
+                View.GONE
+            }
+
+        btnSkipOne?.isEnabled =
+            TranscriptionQueue.hasRunningJob()
+
+        btnSkipOne?.alpha =
+            if (btnSkipOne?.isEnabled == true) {
+                1f
+            } else {
+                0.45f
+            }
+
         if (TranscriptionQueue.isActive()) {
             val (cur, total) = TranscriptionQueue.batchPosition()
             tvPct?.text = "$cur/$total"
@@ -690,7 +961,7 @@ class WhisperKeyboardService : InputMethodService() {
         activeIC = currentInputConnection
 
         refreshAllButtons()
-        // 2-min rule: unclaimed transcripts older than EXPIRY_MS are dropped, never typed stale
+
         val expired = OutstandingStore.clearIfExpired(this)
         if (expired > 0) {
             Toast.makeText(this, "Cleared $expired expired pending transcript(s)", Toast.LENGTH_SHORT).show()
@@ -702,14 +973,14 @@ class WhisperKeyboardService : InputMethodService() {
             else "${TranscriptionQueue.progress()}%"
         updateQueueBadge()
 
-        // Keep model preloading behaviour.
         preloadModel("onStartInputView")
 
         val hasPending = TranscriptionQueue.isActive() ||
                 TextRouter.pendingTypingCount() > 0 ||
                 OutstandingStore.count(this) > 0
         if (hasPending) {
-            // Returned while work was in flight (or parked): type it in, do NOT auto-record.
+
+            autoStartRequested = false
             val typed = autoTypePending()
             if (TranscriptionQueue.isActive() || TextRouter.pendingTypingCount() > 0) {
                 updateStatus("Processing... text will type in automatically")
@@ -717,8 +988,7 @@ class WhisperKeyboardService : InputMethodService() {
                 updateStatus("Typed $typed pending transcript(s) ✓")
             }
         } else if (autoStartRequested && !isRecording.get()) {
-            // Auto-record ONLY when explicitly requested by the
-            // normal-keyboard -> Speech-keyboard switch, once per model session.
+
             autoStartRequested = false
 
             if (KeyboardAutoStart.consumeIfAllowed()) {
@@ -732,25 +1002,20 @@ class WhisperKeyboardService : InputMethodService() {
         }
     }
 
-    /**
-     * Type every parked outstanding transcript into the current field, oldest
-     * first. Returns how many were inserted. No auto-recording follows this.
-     */
     private fun autoTypePending(): Int {
         val ic = currentInputConnection ?: activeIC ?: return 0
         var n = 0
         while (true) {
             val t = OutstandingStore.popOldest(this) ?: break
             if (t.isBlank()) continue
-            try {
-                val capped = capsFn?.invoke(t) ?: t
-                ic.commitText("$capped ", 1)
-                n++
-            } catch (_: Exception) {
-                // field rejected it - park it back and stop
-                OutstandingStore.add(this, t)
+            val capped = capsFn?.invoke(t) ?: t
+            val inserted = runCatching { ic.commitText("$capped ", 1) }.getOrDefault(false)
+            if (!inserted) {
+
+                OutstandingStore.requeueFront(this, t)
                 break
             }
+            n++
         }
         if (n > 0) {
             val left = OutstandingStore.count(this)
@@ -776,14 +1041,10 @@ class WhisperKeyboardService : InputMethodService() {
         stopHook = null
         activeIC = null
         try { activeRecorder?.stop() } catch (_: Exception) {}
-        // shared recorder stays alive process-wide (never release)
+
         activeRecorder = null
         try { unregisterReceiver(screenOffReceiver) } catch (_: Exception) {}
         stopImeForeground()
         super.onDestroy()
     }
 }
-
-
-
-

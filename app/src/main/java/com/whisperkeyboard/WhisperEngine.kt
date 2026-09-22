@@ -6,13 +6,21 @@ import kotlin.concurrent.withLock
 
 object WhisperEngine {
 
-    init {
+    private val nativeAvailable: Boolean =
         try {
             System.loadLibrary("whisper_jni")
             AppLog.i("WhisperEngine", "Native library loaded")
+            true
         } catch (e: Throwable) {
             AppLog.e("WhisperEngine", "Failed to load native library: ${e.message}")
+            false
         }
+
+    private fun requireNative(): Boolean {
+        if (nativeAvailable) return true
+
+        lastError = "Whisper native library unavailable"
+        return false
     }
 
     private const val TAG = "WhisperEngine"
@@ -29,31 +37,28 @@ object WhisperEngine {
     private external fun nativeSetThreads(threads: Int)
     private external fun nativeTranscribe(modelPath: String, wavPath: String, lang: String): String
 
-    /** Set whisper thread count (takes effect on next transcription). */
     fun setThreads(threads: Int) {
         try { nativeSetThreads(threads) } catch (e: Throwable) { AppLog.w(TAG, "setThreads: ${e.message}") }
     }
 
-    /** Read user pref and apply. "auto" adapts to the device: 8+ cores=6, 4+=4, else cores. */
     fun applyThreadPref(ctx: android.content.Context?): Int {
         if (ctx == null) return 4
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
         val pref = ctx.getSharedPreferences("whisper", android.content.Context.MODE_PRIVATE).getString("threads_mode", "auto") ?: "auto"
         val n = if (pref == "auto") {
-            if (cores >= 8) 6 else if (cores >= 4) 4 else cores
+            SttEngines.automaticThreadCount()
         } else pref.toIntOrNull()?.coerceIn(1, cores) ?: 4
         setThreads(n)
         AppLog.i(TAG, "threads=$n (${cores} cores detected, mode=$pref)")
         return n
     }
 
-    /** Abort the in-flight transcription ASAP (progress callback returns abort). */
     fun cancelCurrent() {
         try { nativeCancel() } catch (e: Throwable) { AppLog.w(TAG, "cancel: ${e.message}") }
     }
 
-    /** Preload/cache the model with retries. No-op if already loaded for this path. */
     fun ensureModel(modelPath: String): Boolean {
+        if (!requireNative()) return false
         if (modelPath.isBlank()) return false
         lock.withLock {
             try {
@@ -64,11 +69,26 @@ object WhisperEngine {
                     return false
                 }
                 if (loadedPath == modelPath) return true
+                if (
+                    loadedPath != null &&
+                    loadedPath != modelPath
+                ) {
+                    runCatching {
+                        nativeFree()
+                    }.onFailure {
+                        AppLog.w(
+                            TAG,
+                            "Unable to free previous model: ${it.message}"
+                        )
+                    }
+
+                    loadedPath = null
+                }
                 var lastMsg = ""
                 for (attempt in 1..3) {
-                    val t0 = System.currentTimeMillis()
+                    val t0 = android.os.SystemClock.elapsedRealtime()
                     val handle = try { nativeInit(modelPath) } catch (e: Throwable) { AppLog.e(TAG, "nativeInit threw: ${e.message}"); -1L }
-                    val ms = System.currentTimeMillis() - t0
+                    val ms = android.os.SystemClock.elapsedRealtime() - t0
                     if (handle > 0) {
                         val wasReload = loadedPath != modelPath
                         loadedPath = modelPath
@@ -92,11 +112,11 @@ object WhisperEngine {
         }
     }
 
-    fun isLoaded(modelPath: String): Boolean = loadedPath == modelPath
+    fun isLoaded(modelPath: String): Boolean =
+        loadedPath == modelPath && nativeAvailable
     fun loadedModel(): String? = loadedPath
     fun isBusy(): Boolean = busyCount.get() > 0
 
-    /** Unload cached model only when no transcription is in flight. Returns false if busy. */
     fun unloadIfIdle(): Boolean {
         lock.withLock {
             if (busyCount.get() > 0) {
@@ -118,13 +138,14 @@ object WhisperEngine {
     }
 
     fun transcribe(modelPath: String, wavPath: String, lang: String): String {
+        if (!requireNative()) return "ERROR: Whisper native library unavailable"
         busyCount.incrementAndGet()
-        val t0 = System.currentTimeMillis()
+        val t0 = android.os.SystemClock.elapsedRealtime()
         try {
             lock.withLock {
                 try {
                     val effectiveLang = if (lang == "auto" || lang.isEmpty()) "auto" else lang
-                    // self-heal: reload if cache is empty or different (with one retry)
+
                     if (loadedPath != modelPath) {
                         var ok = false
                         for (attempt in 1..2) {
@@ -141,7 +162,7 @@ object WhisperEngine {
                         AppLog.i(TAG, "reloaded model in transcribe: ${modelPath.substringAfterLast('/')}")
                     }
                     val out = nativeTranscribe(modelPath, wavPath, effectiveLang)
-                    val ms = System.currentTimeMillis() - t0
+                    val ms = android.os.SystemClock.elapsedRealtime() - t0
                     AppLog.i(TAG, "transcribed in $ms ms -> ${out.take(60)}")
                     lastError = if (out.startsWith("ERROR:")) out else ""
                     return out
@@ -155,7 +176,7 @@ object WhisperEngine {
                     AppLog.e(TAG, "Transcribe error: ${e.message}")
                     return "ERROR: ${e.message}"
                 } finally {
-                    // nothing extra
+
                 }
             }
         } finally {
