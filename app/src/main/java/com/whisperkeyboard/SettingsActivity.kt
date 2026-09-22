@@ -92,8 +92,10 @@ class SettingsActivity : AppCompatActivity() {
             val ready = isModelKeyReady(currentEngine(), key)
             tv.text = modelDisplayName(currentEngine(), key)
             tv.setTextColor(
-                if (ready) 0xFF212121.toInt()
-                else 0xFF616161.toInt()
+                androidx.core.content.ContextCompat.getColor(
+                    this@SettingsActivity,
+                    if (ready) R.color.text_primary else R.color.text_muted
+                )
             )
         } catch (_: Exception) {}
     }
@@ -123,6 +125,7 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WhisperApp.applyTheme(this)
         setContentView(R.layout.activity_settings)
 
         spinnerEngine = findViewById(R.id.spinnerEngine)
@@ -465,6 +468,27 @@ class SettingsActivity : AppCompatActivity() {
         val audioFormatKeys = arrayOf("m4a", "wav")
         val audioAdapter = ArrayAdapter(this, R.layout.spinner_item, audioFormats)
         audioAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
+        val themeKeys = arrayOf("system", "light", "dark")
+        val themeNames = arrayOf(
+            getString(R.string.theme_system_default),
+            getString(R.string.theme_light),
+            getString(R.string.theme_dark)
+        )
+        val themeAdapter = ArrayAdapter(this, R.layout.spinner_item, themeNames)
+        themeAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
+        val spinnerTheme = findViewById<Spinner>(R.id.spinnerTheme)
+        spinnerTheme.adapter = themeAdapter
+        spinnerTheme.setSelection(themeKeys.indexOf(prefs.getString("theme_mode", "system")).coerceAtLeast(0))
+        spinnerTheme.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, pos: Int, id: Long) {
+                if (!settingsInitialized) return
+                prefs.edit().putString("theme_mode", themeKeys[pos.coerceIn(themeKeys.indices)]).apply()
+                saved()
+                WhisperApp.applyTheme(this@SettingsActivity)
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+
         val spinnerAudio = findViewById<Spinner>(R.id.spinnerAudioFormat)
         spinnerAudio.adapter = audioAdapter
         spinnerAudio.setSelection(audioFormatKeys.indexOf(prefs.getString("audio_format", "m4a")).coerceAtLeast(0))

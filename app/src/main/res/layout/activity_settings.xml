@@ -17,9 +17,9 @@
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
                 <TextView android:text="@string/model_engine_size_picked_here_keyboard_i" android:textStyle="bold" android:textSize="14sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
                 <TextView android:text="@string/engine" android:textStyle="bold" android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
-                <Spinner android:id="@+id/spinnerEngine" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="@color/surface" android:popupBackground="#D9D9D9" android:layout_marginTop="4dp" android:padding="8dp"/>
+                <Spinner android:id="@+id/spinnerEngine" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="@color/surface" android:popupBackground="@color/popup" android:layout_marginTop="4dp" android:padding="8dp"/>
                 <TextView android:text="@string/moonshine_v2_english_only_much_faster_wh" android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <Spinner android:id="@+id/spinnerModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="@color/surface" android:popupBackground="#D9D9D9" android:layout_marginTop="8dp" android:padding="8dp"/>
+                <Spinner android:id="@+id/spinnerModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="@color/surface" android:popupBackground="@color/popup" android:layout_marginTop="8dp" android:padding="8dp"/>
                 <com.google.android.material.button.MaterialButton android:id="@+id/btnDownloadModel" android:text="@string/download_model" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
                 <com.google.android.material.button.MaterialButton android:id="@+id/btnTestModel" android:text="@string/load_model_test" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
                 <ProgressBar android:id="@+id/progressModel" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="10dp" android:visibility="gone" android:layout_marginTop="8dp"/>
@@ -34,7 +34,15 @@
         <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="@color/surface" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
             <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
                 <TextView android:text="@string/language" android:textStyle="bold" android:textSize="14sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                <Spinner android:id="@+id/spinnerLang" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="@color/surface" android:popupBackground="#D9D9D9" android:layout_marginTop="6dp" android:padding="8dp"/>
+                <Spinner android:id="@+id/spinnerLang" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="@color/surface" android:popupBackground="@color/popup" android:layout_marginTop="6dp" android:padding="8dp"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Appearance -->
+        <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardCornerRadius="12dp" app:cardElevation="2dp" app:cardBackgroundColor="@color/surface" android:layout_marginTop="12dp" app:strokeColor="#E0E0E0" app:strokeWidth="1dp">
+            <LinearLayout android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="14dp">
+                <TextView android:text="@string/appearance" android:textStyle="bold" android:textSize="14sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                <Spinner android:id="@+id/spinnerTheme" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="@color/surface" android:popupBackground="@color/popup" android:layout_marginTop="6dp" android:padding="8dp"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -54,7 +62,7 @@
                 <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchOutClip" android:text="@string/copy_outstanding_transcripts_to_clipboar" android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:checked="true"/>
 
                 <TextView android:id="@+id/tvCores" android:text="@string/cpu_cores_detected" android:textStyle="bold" android:textSize="14sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp"/>
-                <Spinner android:id="@+id/spinnerThreads" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="@color/surface" android:popupBackground="#D9D9D9" android:layout_marginTop="4dp"/>
+                <Spinner android:id="@+id/spinnerThreads" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="@color/surface" android:popupBackground="@color/popup" android:layout_marginTop="4dp"/>
 
                 <TextView android:text="@string/pause_that_ends_a_chunk" android:textStyle="bold" android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp"/>
                 <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
@@ -88,7 +96,7 @@
                 <TextView android:text="@string/full_session_audio_in_documents_whispern" android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
                 <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchSaveAudioMeeting" android:text="@string/save_meeting_audio_keyboard_always_types" android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:checked="true"/>
                 <TextView android:text="@string/format" android:textStyle="bold" android:textSize="13sp" android:textColor="@color/text_primary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp"/>
-                <Spinner android:id="@+id/spinnerAudioFormat" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="@color/surface" android:popupBackground="#D9D9D9" android:layout_marginTop="4dp"/>
+                <Spinner android:id="@+id/spinnerAudioFormat" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp" android:background="@color/surface" android:popupBackground="@color/popup" android:layout_marginTop="4dp"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

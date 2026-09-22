@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Speech to Text</string>
+    <string name="appearance">Appearance</string>
+    <string name="theme_system_default">System default</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
     <string name="mic_glyph">🎤</string>
     <string name="a11y_service_desc">Lets Speech to Text insert transcribed text into the currently focused field when another keyboard is active. The service checks the current screen only to find an editable field. It does not store or transmit screen content.</string>
     <string name="start_recording">Start recording</string>

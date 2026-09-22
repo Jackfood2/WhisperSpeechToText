@@ -6,11 +6,18 @@ import android.content.Context
 class WhisperApp : Application() {
     companion object {
         @Volatile var holder: Context? = null
-    }
-    override fun onCreate() {
-        super.onCreate()
-        holder = this
-        installGlobalCrashCapture()
+
+        fun applyTheme(ctx: Context) {
+            val mode = ctx.getSharedPreferences("whisper", Context.MODE_PRIVATE)
+                .getString("theme_mode", "system") ?: "system"
+            androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+                when (mode) {
+                    "light" -> androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO
+                    "dark" -> androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES
+                    else -> androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+                }
+            )
+        }
     }
 
     private fun installGlobalCrashCapture() {

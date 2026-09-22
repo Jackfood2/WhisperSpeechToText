@@ -254,6 +254,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WhisperApp.applyTheme(this)
         setContentView(R.layout.activity_main)
 
         tvMeetingStatus = findViewById(R.id.tvMeetingStatus)

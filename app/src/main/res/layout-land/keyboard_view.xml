@@ -10,8 +10,8 @@
     <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
         <TextView android:id="@+id/tvStatus" android:text="Tap the mic and speak" android:textColor="@color/keyboard_text" android:textSize="12sp" android:textStyle="bold" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1"/>
         <TextView android:id="@+id/tvEngine" android:text="WHISPER | small" android:textColor="@color/keyboard_bg" android:background="@color/badge_yellow" android:textSize="9sp" android:textStyle="bold" android:paddingStart="6dp" android:paddingEnd="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:layout_marginEnd="4dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-        <com.google.android.material.button.MaterialButton android:id="@+id/btnKeyboardGear" style="@style/Widget.Material3.Button.IconButton" android:layout_width="48dp" android:layout_height="48dp" android:minWidth="48dp" android:minHeight="48dp" app:icon="@android:drawable/ic_menu_preferences" app:iconTint="@color/white" android:contentDescription="Open app settings"/>
-        <com.google.android.material.button.MaterialButton android:id="@+id/btnCloseKeyboard" style="@style/Widget.Material3.Button.IconButton" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="4dp" android:minWidth="48dp" android:minHeight="48dp" app:icon="@android:drawable/ic_menu_close_clear_cancel" app:iconTint="@color/white" android:contentDescription="@string/switch_previous_keyboard"/>
+        <androidx.appcompat.widget.AppCompatImageButton android:id="@+id/btnKeyboardGear" android:layout_width="48dp" android:layout_height="48dp" android:minWidth="48dp" android:minHeight="48dp" android:background="?android:attr/selectableItemBackgroundBorderless" android:src="@android:drawable/ic_menu_preferences" android:contentDescription="Open app settings"/>
+        <androidx.appcompat.widget.AppCompatImageButton android:id="@+id/btnCloseKeyboard" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="4dp" android:minWidth="48dp" android:minHeight="48dp" android:background="?android:attr/selectableItemBackgroundBorderless" android:src="@android:drawable/ic_menu_close_clear_cancel" android:contentDescription="@string/switch_previous_keyboard"/>
     </LinearLayout>
 
     <!-- Selected options as read-only labels -->
@@ -20,7 +20,7 @@
     <!-- Outstanding transcripts held for later - one tap inserts oldest -->
     <LinearLayout android:id="@+id/rowOutstanding" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="4dp" android:visibility="gone">
         <Button android:id="@+id/btnTypeOutstanding" android:text="@string/type_pending_transcript" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:minHeight="48dp" android:textSize="12sp" android:textStyle="bold" android:textColor="@color/text_primary" android:backgroundTint="@color/key_blue"/>
-        <com.google.android.material.button.MaterialButton android:id="@+id/btnDiscardOutstanding" style="@style/Widget.Material3.Button.IconButton" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="4dp" android:minWidth="48dp" android:minHeight="48dp" app:icon="@android:drawable/ic_menu_delete" app:iconTint="@color/white" android:contentDescription="@string/discard_pending_transcript"/>
+        <androidx.appcompat.widget.AppCompatImageButton android:id="@+id/btnDiscardOutstanding" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="4dp" android:minWidth="48dp" android:minHeight="48dp" android:background="?android:attr/selectableItemBackgroundBorderless" android:src="@android:drawable/ic_menu_delete" android:contentDescription="@string/discard_pending_transcript"/>
     </LinearLayout>
 
     <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:layout_marginTop="6dp">
@@ -39,8 +39,8 @@
 
         <!-- Backspace + Enter (tap = single-char/line, hold = repeat) -->
         <LinearLayout android:orientation="vertical" android:layout_width="wrap_content" android:layout_height="wrap_content">
-            <com.google.android.material.button.MaterialButton android:id="@+id/btnBackspace" style="@style/Widget.Material3.Button.IconButton" android:layout_width="62dp" android:layout_height="52dp" android:minWidth="48dp" android:minHeight="48dp" app:icon="@drawable/ic_backspace" app:iconTint="@color/white" app:iconSize="28dp" android:contentDescription="@string/backspace"/>
-            <com.google.android.material.button.MaterialButton android:id="@+id/btnEnter" style="@style/Widget.Material3.Button.IconButton" android:layout_width="62dp" android:layout_height="48dp" android:layout_marginTop="4dp" android:minWidth="48dp" android:minHeight="48dp" app:icon="@drawable/ic_enter" app:iconTint="@color/white" app:iconSize="26dp" android:contentDescription="Enter: new line"/>
+            <androidx.appcompat.widget.AppCompatImageButton android:id="@+id/btnBackspace" android:layout_width="62dp" android:layout_height="52dp" android:minWidth="48dp" android:minHeight="48dp" android:background="@drawable/bg_keyboard_key" android:src="@drawable/ic_backspace" android:scaleType="center" android:contentDescription="@string/backspace"/>
+            <androidx.appcompat.widget.AppCompatImageButton android:id="@+id/btnEnter" android:layout_width="62dp" android:layout_height="48dp" android:layout_marginTop="4dp" android:minWidth="48dp" android:minHeight="48dp" android:background="@drawable/bg_keyboard_key" android:src="@drawable/ic_enter" android:scaleType="center" android:contentDescription="Enter: new line"/>
         </LinearLayout>
     </LinearLayout>
 

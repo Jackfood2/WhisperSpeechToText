@@ -46,6 +46,7 @@ class WhisperKeyboardService : InputMethodService() {
         const val MAX_CHUNK_MS = 60_000L
         const val FIRST_SESSION_SILENCE_MS = 2_000L
         const val CHUNK_SILENCE_MS = 2_000L
+        private const val MIN_TRANSCRIBE_BYTES = 96_000
         private const val FIRST_SESSION_NO_SPEECH_MS =
             10_000L
 
@@ -64,14 +65,14 @@ class WhisperKeyboardService : InputMethodService() {
     private var tvPct: TextView? = null
     private var progressBar: ProgressBar? = null
     private var btnMicCircle: androidx.appcompat.widget.AppCompatImageButton? = null
-    private var btnCloseKeyboard: Button? = null
-    private var btnBackspace: Button? = null
-    private var btnEnter: Button? = null
+    private var btnCloseKeyboard: androidx.appcompat.widget.AppCompatImageButton? = null
+    private var btnBackspace: androidx.appcompat.widget.AppCompatImageButton? = null
+    private var btnEnter: androidx.appcompat.widget.AppCompatImageButton? = null
     private var btnSpace: Button? = null
-    private var btnKeyboardGear: Button? = null
+    private var btnKeyboardGear: androidx.appcompat.widget.AppCompatImageButton? = null
     private var rowOutstanding: View? = null
     private var btnTypeOutstanding: Button? = null
-    private var btnDiscardOutstanding: Button? = null
+    private var btnDiscardOutstanding: androidx.appcompat.widget.AppCompatImageButton? = null
     private var rowProcessing: View? = null
     private var btnSkipOne: Button? = null
     private var btnStopAll: Button? = null
@@ -798,7 +799,10 @@ class WhisperKeyboardService : InputMethodService() {
                 buffer.toByteArray()
             }
 
-        if (bytes.size <= 1_800) return
+        if (bytes.size < MIN_TRANSCRIBE_BYTES) {
+            AppLog.i(TAG, "Chunk too short (${bytes.size / 32000.0}s) - omitted from transcription")
+            return
+        }
 
         val id =
             "${System.currentTimeMillis()}" +

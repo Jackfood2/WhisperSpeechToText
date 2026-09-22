@@ -25,6 +25,7 @@ class PrivacyDashboardActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WhisperApp.applyTheme(this)
 
         try {
             wireUi()
