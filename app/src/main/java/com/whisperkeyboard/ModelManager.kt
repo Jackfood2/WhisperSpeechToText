@@ -77,7 +77,14 @@ object ModelManager {
             "${finalFile.name}.part"
         )
 
-        runCatching { partialFile.delete() }
+        // Resume instead of restarting: a 1.4 GB "medium" download that dies at
+        // 90% previously started over from zero.
+        val partialLen = if (partialFile.isFile) partialFile.length() else 0L
+        if (partialLen > 0L) {
+            val exp = expectedBytes(model)
+            if (exp > 0L && partialLen >= exp) runCatching { partialFile.delete() }
+        }
+        val start = if (partialFile.isFile) partialFile.length() else 0L
 
         val conn = URL(urlFor(model))
             .openConnection() as HttpURLConnection
@@ -87,21 +94,28 @@ object ModelManager {
             conn.connectTimeout = 30_000
             conn.readTimeout = 60_000
             conn.requestMethod = "GET"
+            if (start > 0L) conn.setRequestProperty("Range", "bytes=$start-")
             conn.connect()
 
             val code = conn.responseCode
+            val append = start > 0L && code == 206
             if (code !in 200..299) {
                 throw java.io.IOException(
                     "Download failed with HTTP $code"
                 )
             }
 
-            val totalSize = conn.contentLengthLong
+            val contentLen: Long = conn.contentLengthLong
+            val totalSize: Long = if (append) {
+                if (contentLen > 0L) start + contentLen else 0L
+            } else {
+                contentLen
+            }
 
             conn.inputStream.buffered().use { input ->
-                FileOutputStream(partialFile).buffered().use { output ->
+                FileOutputStream(partialFile, append).buffered().use { output ->
                     val buffer = ByteArray(128 * 1024)
-                    var totalRead = 0L
+                    var totalRead = if (append) start else 0L
                     var lastProgress = -1
 
                     while (true) {
@@ -157,7 +171,7 @@ object ModelManager {
                 "Downloaded: ${finalFile.name}"
             )
         } catch (e: Exception) {
-            partialFile.delete()
+            // Keep the .part file so the next attempt resumes.
             throw e
         } finally {
             conn.disconnect()
@@ -212,6 +226,9 @@ object ModelManager {
     }
 
     fun clearAllModels(ctx: Context): Pair<Int, Long> {
+        // Drop the native context first: deleting an mmap'd ggml file while it is
+        // still loaded leaves isComplete() == false with the model resident.
+        runCatching { SttEngines.unloadIdle() }
         val files = modelsDir(ctx).listFiles() ?: return 0 to 0L
 
         var deletedCount = 0

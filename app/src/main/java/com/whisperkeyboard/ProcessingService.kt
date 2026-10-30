@@ -35,44 +35,63 @@ class ProcessingService : Service() {
         return recordingNow || transcriptionNow || deliveryNow
     }
 
+    private var unloadRequested = false
+
     private val poller = object : Runnable {
         override fun run() {
             val busy = busyNow()
-            if (!busy) {
-                idleTicks++
 
-                val configuredMinutes =
-                    getSharedPreferences("whisper", MODE_PRIVATE)
-                        .getInt("unload_idle_ticks", 2)
-                        .coerceIn(0, 120)
-
-                val ticksAllowed = configuredMinutes * 30
-
-                if (ticksAllowed > 0 && idleTicks == ticksAllowed) {
-
-                    Thread {
-                        if (!busyNow()) {
-                            SttEngines.unloadIdle()
-                        } else {
-                            AppLog.i("Processing", "unload skipped - activity resumed")
-                        }
-
-                        handler.post {
-                            if (SttEngines.loadedModel() == null) {
-                                runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
-                                stopSelf()
-                            }
-                        }
-                    }.start()
-                } else if (ticksAllowed > 0 && idleTicks >= ticksAllowed + 8) {
-                    runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
-                    stopSelf()
-                    return
-                }
-
-            } else {
+            if (busy) {
                 idleTicks = 0
+                unloadRequested = false
+                handler.postDelayed(this, 1000)
+                return
             }
+
+            idleTicks++
+
+            val configuredMinutes =
+                getSharedPreferences("whisper", MODE_PRIVATE)
+                    .getInt("unload_idle_ticks", 2)
+                    .coerceIn(0, 120)
+
+            if (configuredMinutes == 0) {
+                // 0 means "never unload the model". The old code then kept this
+                // service foregrounded with a 1 Hz main-thread tick forever;
+                // park the poller and leave the model resident instead.
+                handler.postDelayed(this, 30_000)
+                return
+            }
+
+            // Fixed: the setting counts MINUTES and this poller ticks once per
+            // second, but the old `minutes * 30` unloaded after 60 s while the
+            // UI promised 2 minutes. Premature unload is expensive: the next
+            // utterance has to page the whole model back in from flash.
+            val ticksAllowed = configuredMinutes * 60
+
+            if (!unloadRequested && idleTicks >= ticksAllowed) {
+                unloadRequested = true
+
+                Thread {
+                    if (!busyNow()) {
+                        SttEngines.unloadIdle()
+                    } else {
+                        AppLog.i("Processing", "unload skipped - activity resumed")
+                    }
+
+                    handler.post {
+                        if (SttEngines.loadedModel() == null) {
+                            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+                            stopSelf()
+                        }
+                    }
+                }.start()
+            } else if (idleTicks >= ticksAllowed + 8) {
+                runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+                stopSelf()
+                return
+            }
+
             handler.postDelayed(this, 1000)
         }
     }

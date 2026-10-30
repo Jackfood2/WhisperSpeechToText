@@ -46,7 +46,10 @@ class WhisperKeyboardService : InputMethodService() {
         const val MAX_CHUNK_MS = 60_000L
         const val FIRST_SESSION_SILENCE_MS = 2_000L
         const val CHUNK_SILENCE_MS = 2_000L
-        private const val MIN_TRANSCRIBE_BYTES = 96_000
+        // 0.75 s of 16 kHz mono/16-bit. Was 96_000 (3 s), which silently
+        // discarded the first utterance because the first session auto-stops
+        // after FIRST_SESSION_SILENCE_MS = 2 s.
+        private const val MIN_TRANSCRIBE_BYTES = 24_000
         private const val FIRST_SESSION_NO_SPEECH_MS =
             10_000L
 
@@ -229,7 +232,12 @@ class WhisperKeyboardService : InputMethodService() {
         preloadModel("onCreate")
     }
 
+    private val preloadOnce = AtomicBoolean(false)
+
     private fun preloadModel(from: String) {
+        // Auto-preloads (onCreate / every onStartInputView) only ever run once
+        // per process; explicit preloads ("startRecording") always run.
+        if (from != "startRecording" && !preloadOnce.compareAndSet(false, true)) return
         Thread {
             try {
                 val eng = SttEngines.current(this)
@@ -831,7 +839,7 @@ class WhisperKeyboardService : InputMethodService() {
 
             val sec = bytes.size / 32000.0
             AppLog.i(TAG, "enqueue chunk $engine/$model %.1fs (%d KB)".format(sec, bytes.size / 1024))
-            handler.post { Toast.makeText(this@WhisperKeyboardService, "Chunk %.0fs queued".format(sec), Toast.LENGTH_SHORT).show() }
+            handler.post { updateStatus("Chunk %.0fs queued".format(sec)) }
 
             val job = TranscriptionQueue.Job(
                 context = applicationContext,
@@ -918,7 +926,10 @@ class WhisperKeyboardService : InputMethodService() {
         }
         updateProcessingRow()
         tvQueueBadge?.removeCallbacks(badgeRefresh)
-        tvQueueBadge?.postDelayed(badgeRefresh, 1200)
+        // Don't schedule a wakeup when there is nothing in flight.
+        if (TranscriptionQueue.pendingCount() > 0 || TranscriptionQueue.isActive()) {
+            tvQueueBadge?.postDelayed(badgeRefresh, 1200)
+        }
     }
 
     private fun updateProcessingRow() {

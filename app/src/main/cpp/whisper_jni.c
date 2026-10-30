@@ -110,6 +110,11 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
 
     LOGI("Transcribe: model=%s wav=%s lang=%s", model_path, wav_path, lang);
 
+    // Clear a stale cancel BEFORE the (possibly slow) model load. Previously this
+    // happened after ensure_context(), so a cancel requested while the model was
+    // loading was silently discarded and the whole transcription ran anyway.
+    g_cancel = 0;
+
     // Use cached context (reloads only if model path changed)
     struct whisper_context *ctx = ensure_context(model_path);
 
@@ -144,18 +149,65 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
         return (*env)->NewStringUTF(env, "ERROR: Invalid WAV header");
     }
 
-    // Parse WAV format
+    // Parse WAV format. Every field is little-endian; data_size is read as
+    // unsigned because a signed read turns corrupt or oversized values into
+    // negative sample counts.
     int channels = header[22] | (header[23] << 8);
-    int sample_rate = header[24] | (header[25] << 8) | (header[26] << 16) | (header[27] << 24);
+    int sample_rate = (int)((unsigned int)header[24] | ((unsigned int)header[25] << 8) |
+                            ((unsigned int)header[26] << 16) | ((unsigned int)header[27] << 24));
     int bits_per_sample = header[34] | (header[35] << 8);
-    int data_size = header[40] | (header[41] << 8) | (header[42] << 16) | (header[43] << 24);
+    long data_size = (long)((unsigned int)header[40] | ((unsigned int)header[41] << 8) |
+                            ((unsigned int)header[42] << 16) | ((unsigned int)header[43] << 24));
 
-    LOGI("WAV: channels=%d rate=%d bits=%d data_size=%d", channels, sample_rate, bits_per_sample, data_size);
+    LOGI("WAV: channels=%d rate=%d bits=%d data_size=%ld", channels, sample_rate, bits_per_sample, data_size);
 
-    int num_samples = data_size / (bits_per_sample / 8);
-    if (channels == 2) num_samples /= 2;
+    if (channels < 1 || channels > 2 || sample_rate <= 0 ||
+        (bits_per_sample != 16 && bits_per_sample != 32) || data_size <= 0) {
+        LOGE("Rejecting WAV: channels=%d rate=%d bits=%d data=%ld",
+             channels, sample_rate, bits_per_sample, data_size);
+        fclose(fp);
+        // ctx stays cached (freed via nativeFree)
+        (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
+        (*env)->ReleaseStringUTFChars(env, jWavPath, wav_path);
+        (*env)->ReleaseStringUTFChars(env, jLang, lang);
+        return (*env)->NewStringUTF(env, "ERROR: Unsupported WAV format");
+    }
 
-    float *audio_data = (float *)malloc(num_samples * sizeof(float));
+    // Clamp the declared payload to the bytes that really exist. A header that
+    // overstates data_size used to hand uninitialised heap to whisper_full,
+    // which produced confident hallucinated text instead of a clean error.
+    long file_bytes = 0;
+    if (fseek(fp, 0, SEEK_END) == 0) {
+        file_bytes = ftell(fp);
+    }
+    if (file_bytes > 44 && data_size > file_bytes - 44) {
+        LOGE("WAV data_size %ld exceeds available %ld - clamping", data_size, file_bytes - 44);
+        data_size = file_bytes - 44;
+    }
+    if (fseek(fp, 44, SEEK_SET) != 0) {
+        fclose(fp);
+        (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
+        (*env)->ReleaseStringUTFChars(env, jWavPath, wav_path);
+        (*env)->ReleaseStringUTFChars(env, jLang, lang);
+        return (*env)->NewStringUTF(env, "ERROR: Invalid WAV header");
+    }
+
+    long bytes_per_frame = (long)channels * (long)(bits_per_sample / 8);
+    long frames = bytes_per_frame > 0 ? data_size / bytes_per_frame : 0;
+    if (frames <= 0 || frames > 16000L * 60L * 30L) {
+        LOGE("Refusing WAV with %ld frames", frames);
+        fclose(fp);
+        (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
+        (*env)->ReleaseStringUTFChars(env, jWavPath, wav_path);
+        (*env)->ReleaseStringUTFChars(env, jLang, lang);
+        return (*env)->NewStringUTF(env, "ERROR: Empty WAV file");
+    }
+
+    int num_samples = (int)frames;
+
+    // calloc, not malloc: every float must be initialised before whisper_full
+    // sees it, so a short read degrades to silence instead of noise.
+    float *audio_data = (float *)calloc((size_t)num_samples, sizeof(float));
     if (!audio_data) {
         fclose(fp);
         // ctx stays cached (freed via nativeFree)
@@ -167,33 +219,55 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
 
     // Read PCM data and convert to float [-1, 1]
     if (bits_per_sample == 16) {
-        short *raw = (short *)malloc(num_samples * channels * sizeof(short));
-        if (raw) {
-            int read_count = fread(raw, sizeof(short), num_samples * channels, fp);
-            (void)read_count;
-            for (int i = 0; i < num_samples; i++) {
-                if (channels == 2) {
-                    audio_data[i] = ((float)(raw[i*2] + raw[i*2+1]) / 2.0f) / 32768.0f;
-                } else {
-                    audio_data[i] = (float)raw[i] / 32768.0f;
-                }
-            }
-            free(raw);
+        size_t want = (size_t)num_samples * (size_t)channels;
+        short *raw = (short *)malloc(want * sizeof(short));
+        if (!raw) {
+            free(audio_data);
+            fclose(fp);
+            (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
+            (*env)->ReleaseStringUTFChars(env, jWavPath, wav_path);
+            (*env)->ReleaseStringUTFChars(env, jLang, lang);
+            return (*env)->NewStringUTF(env, "ERROR: Out of memory");
         }
+        size_t got = fread(raw, sizeof(short), want, fp);
+        if (got < want) {
+            LOGE("Short read: %zu of %zu frames present",
+                 got / (size_t)channels, want / (size_t)channels);
+            num_samples = (int)(got / (size_t)channels);
+        }
+        for (int i = 0; i < num_samples; i++) {
+            if (channels == 2) {
+                audio_data[i] = (((float)raw[i*2] + (float)raw[i*2+1]) / 2.0f) / 32768.0f;
+            } else {
+                audio_data[i] = (float)raw[i] / 32768.0f;
+            }
+        }
+        free(raw);
     } else if (bits_per_sample == 32) {
-        int *raw = (int *)malloc(num_samples * channels * sizeof(int));
-        if (raw) {
-            int read_count = fread(raw, sizeof(int), num_samples * channels, fp);
-            (void)read_count;
-            for (int i = 0; i < num_samples; i++) {
-                if (channels == 2) {
-                    audio_data[i] = ((float)(raw[i*2] + raw[i*2+1]) / 2.0f) / 2147483648.0f;
-                } else {
-                    audio_data[i] = (float)raw[i] / 2147483648.0f;
-                }
-            }
-            free(raw);
+        size_t want = (size_t)num_samples * (size_t)channels;
+        int *raw = (int *)malloc(want * sizeof(int));
+        if (!raw) {
+            free(audio_data);
+            fclose(fp);
+            (*env)->ReleaseStringUTFChars(env, jModelPath, model_path);
+            (*env)->ReleaseStringUTFChars(env, jWavPath, wav_path);
+            (*env)->ReleaseStringUTFChars(env, jLang, lang);
+            return (*env)->NewStringUTF(env, "ERROR: Out of memory");
         }
+        size_t got = fread(raw, sizeof(int), want, fp);
+        if (got < want) {
+            LOGE("Short read: %zu of %zu frames present",
+                 got / (size_t)channels, want / (size_t)channels);
+            num_samples = (int)(got / (size_t)channels);
+        }
+        for (int i = 0; i < num_samples; i++) {
+            if (channels == 2) {
+                audio_data[i] = (((float)raw[i*2] + (float)raw[i*2+1]) / 2.0f) / 2147483648.0f;
+            } else {
+                audio_data[i] = (float)raw[i] / 2147483648.0f;
+            }
+        }
+        free(raw);
     }
 
     fclose(fp);
@@ -218,16 +292,29 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
 
     LOGI("Audio ready: %d samples (%.1f seconds)", num_samples, (float)num_samples / 16000.0f);
 
-    // Configure whisper params
+    // Configure whisper params.
+    // whisper.cpp defaults are tuned for desktop batch work and are hostile to a
+    // phone: greedy.best_of=2 decodes every segment twice, temperature_inc=0.2
+    // triggers up to five additional full re-decodes on any low-confidence chunk,
+    // and audio_ctx always encodes a full 30 s window even for a 4 s chunk.
     struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.print_realtime = false;
     params.print_progress = false;
     params.print_timestamps = false;
     params.print_special = false;
     params.translate = false;
-    params.single_segment = false;
     params.no_context = true;
+    params.no_timestamps = true;        // word timings are never consumed here
+    params.temperature_inc = 0.0f;      // no 5x fallback re-decode on weak chunks
+    params.greedy.best_of = 1;          // decode once instead of twice
     params.n_threads = g_threads;
+    // NOTE: this vendored whisper.cpp predates n_threads_batch; the encoder uses
+    // params.n_threads as well here.
+    params.single_segment = num_samples <= WHISPER_SAMPLE_RATE * 30;
+    params.audio_ctx = num_samples >= WHISPER_SAMPLE_RATE * 30
+            ? 0
+            : (int)((1500.0f * (float)num_samples) / (30.0f * (float)WHISPER_SAMPLE_RATE));
+    if (params.audio_ctx < 64) params.audio_ctx = 64;
     params.abort_callback = abort_cb;
     params.abort_callback_user_data = NULL;
     params.encoder_begin_callback = encoder_begin_cb;
@@ -240,8 +327,7 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
         params.language = NULL; // auto-detect
     }
 
-    // Run transcription
-    g_cancel = 0;
+    // Run transcription (g_cancel was already cleared before the model load)
     whisper_reset_timings(ctx);
     LOGI("Starting whisper_full...");
 
@@ -256,7 +342,11 @@ Java_com_whisperkeyboard_WhisperEngine_nativeTranscribe(
         return (*env)->NewStringUTF(env, why);
     }
 
+#ifndef NDEBUG
+    // Release builds stay quiet: printing timings on every chunk is logcat spam
+    // and measurable CPU on a phone.
     whisper_print_timings(ctx);
+#endif
 
     // Collect all segment text
     int n_segments = whisper_full_n_segments(ctx);

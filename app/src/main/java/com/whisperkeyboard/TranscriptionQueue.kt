@@ -137,7 +137,7 @@ object TranscriptionQueue {
                     return
                 }
 
-                elapsed += 0.2
+                elapsed += 1.0
                 val pct = when {
                     elapsed < expected -> ((elapsed / expected) * 88).toInt().coerceIn(3, 88)
                     else -> {
@@ -148,7 +148,7 @@ object TranscriptionQueue {
                 }
                 notifyProgress(pct)
             }
-        }, 200L, 200L)
+        }, 1000L, 1000L)
     }
 
     private fun stopSimulatedProgress() {
@@ -283,7 +283,10 @@ object TranscriptionQueue {
         }
 
         return try {
-            stopAllFlag.set(false)
+            // Only a fresh session (nothing pending, worker idle) may clear a
+            // stop-all: a chunk arriving while a stop is in flight must not
+            // resurrect results that were already discarded.
+            if (pendingCount.get() == 1 && !workerRunning.get()) stopAllFlag.set(false)
             submittedCount.incrementAndGet()
             queue.put(safeJob)
 
@@ -376,6 +379,43 @@ object TranscriptionQueue {
     }
 
     fun failedCount(): Int = synchronized(failedJobs) { failedJobs.size }
+
+    private const val MAX_FAILED_JOBS = 25
+    private const val FAILED_DIR_MAX_BYTES = 150L * 1024L * 1024L
+    private const val FAILED_DIR_MAX_AGE_MS = 14L * 24L * 60L * 60L * 1000L
+
+    // Called while holding the failedJobs lock.
+    private fun trimFailedJobsLocked() {
+        while (failedJobs.size > MAX_FAILED_JOBS) {
+            val oldest = failedJobs.removeAt(0)
+            runCatching { oldest.wavFile.delete() }
+        }
+    }
+
+    // The failed/ directory used to grow without bound (~1 MB per 30 s chunk).
+    private fun pruneFailedDir(dir: File) {
+        try {
+            val files = dir.listFiles()?.filter { it.isFile } ?: return
+            if (files.isEmpty()) return
+
+            val cutoff = System.currentTimeMillis() - FAILED_DIR_MAX_AGE_MS
+            var total = 0L
+            for (f in files) total += f.length()
+
+            for (f in files.sortedBy { it.lastModified() }) {
+                val expired = f.lastModified() < cutoff
+                if (!expired && total <= FAILED_DIR_MAX_BYTES) continue
+                val len = f.length()
+                if (f.delete()) {
+                    total -= len
+                    synchronized(failedJobs) {
+                        failedJobs.removeAll { it.wavFile.absolutePath == f.absolutePath }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
 
     private fun failedDir(context: Context): File {
         val dir = File(
@@ -560,7 +600,11 @@ object TranscriptionQueue {
                     break
                 }
                 if (resultText.startsWith("ERROR:")) {
-                    if (attempt < 2) { Log.w(TAG, "Attempt $attempt returned ${resultText.take(60)} - retrying"); AppLog.w(TAG, "attempt $attempt ERROR result - retrying"); continue }
+                    val fatal = resultText.contains("cancelled", true) ||
+                            resultText.contains("Unsupported WAV", true) ||
+                            resultText.contains("Empty WAV", true) ||
+                            resultText.contains("Out of memory", true)
+                    if (attempt < 2 && !fatal) { Log.w(TAG, "Attempt $attempt returned ${resultText.take(60)} - retrying"); AppLog.w(TAG, "attempt $attempt ERROR result - retrying"); continue }
                     throw IllegalStateException(resultText)
                 }
                 val cleaned = resultText.trim()
@@ -580,9 +624,8 @@ object TranscriptionQueue {
                 AppLog.i(TAG, "done ${job.engine}/${job.model} in ${transcribeSeconds}s: ${resultText.take(50)}")
                 recordStats(job.context, job.engine, job.model, audioSec, transcribeSeconds)
                 stopSimulatedProgress(); notifyProgress(100)
-                Thread.sleep(150)
             } catch (e: Exception) {
-                if (attempt < 2) { Log.w(TAG, "Attempt $attempt failed: ${e.message} - retrying"); Thread.sleep(300); continue }
+                if (attempt < 2) { Log.w(TAG, "Attempt $attempt failed: ${e.message} - retrying"); continue }
                 Log.e(TAG, "Transcribe failed after $attempt attempts: ${e.message}", e)
                 AppLog.e(TAG, "transcribe failed x$attempt: ${e.message}")
                 errorMsg = e.message ?: "Unknown error"
@@ -599,18 +642,37 @@ object TranscriptionQueue {
         if (!success && errorMsg.isEmpty()) errorMsg = "Unknown error"
         val wasCancelled = errorMsg.contains("cancelled")
         if (!success && !wasCancelled) {
+            val appCtx = job.context.applicationContext
             try {
                 val failDir = failedDir(job.context)
                 val saved = if (job.wavFile.name.startsWith("failed_")) job.wavFile
                     else uniqueFailedFile(failDir, job.wavFile).also { job.wavFile.copyTo(it, overwrite = false) }
                 AppLog.w(TAG, "saved for retry: ${saved.name}")
-                val retryJob = job.copy(wavFile = saved)
+                // The stored job must NOT carry onResult/onError lambdas from the
+                // original caller: those close over the Service instance (and its
+                // inflated keyboard view), which pinned entire Services in memory.
+                // Recovered text is handed to OutstandingStore instead, so nothing
+                // is lost if the Service is long gone by the time it is retried.
+                val retryJob = Job(
+                    context = appCtx,
+                    wavFile = saved,
+                    model = job.model,
+                    lang = job.lang,
+                    engine = job.engine,
+                    onResult = { text ->
+                        if (text.isNotBlank()) runCatching { OutstandingStore.add(appCtx, text) }
+                    },
+                    onError = { }
+                )
                 synchronized(failedJobs) {
-                    if (failedJobs.none { it.wavFile.absolutePath == saved.absolutePath }) failedJobs.add(retryJob)
+                    if (failedJobs.none { it.wavFile.absolutePath == saved.absolutePath }) {
+                        failedJobs.add(retryJob)
+                        trimFailedJobsLocked()
+                    }
                 }
+                pruneFailedDir(failDir)
             } catch (ex: Exception) {
                 Log.w(TAG, "Failed to save failed WAV: ${ex.message}")
-                synchronized(failedJobs) { failedJobs.add(job) }
             }
         }
         try {

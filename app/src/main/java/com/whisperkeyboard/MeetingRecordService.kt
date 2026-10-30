@@ -32,15 +32,21 @@ class MeetingRecordService : Service() {
         const val SILENCE_RMS_THRESHOLD = 0.015
         private const val MAX_MEETING_HOURS = 8L
 
-        private fun estimatedAudioBytes(): Long {
+        private fun estimatedAudioBytes(minutes: Long = 60L): Long {
             val bytesPerSecond =
                 AudioUtils.SAMPLE_RATE.toLong() * 2L
 
+            // Size the gate for a typical session instead of the 8 h worst case:
+            // requiring ~970 MB free made meetings refuse to start on most
+            // phones. Long recordings are now guarded by a runtime free-space
+            // check in the capture loop.
             return bytesPerSecond *
-                3600L *
-                MAX_MEETING_HOURS +
+                60L *
+                minutes +
                 50L * 1024L * 1024L
         }
+
+        private const val LOW_STORAGE_BYTES = 30L * 1024L * 1024L
 
         @Volatile var isRunning = false
 
@@ -230,7 +236,9 @@ class MeetingRecordService : Service() {
 
         try {
             if (wakeLock?.isHeld == false) {
-                wakeLock?.acquire()
+                // Bounded: never hold a PARTIAL_WAKE_LOCK forever if the service
+                // is killed without onDestroy.
+                wakeLock?.acquire(MAX_MEETING_HOURS * 60L * 60L * 1000L)
             }
         } catch (_: Exception) {}
 
@@ -247,12 +255,14 @@ class MeetingRecordService : Service() {
                 recorder.startRecording()
 
                 var lastNotifUpdate = 0L
+                var lastSpaceCheck = 0L
                 var silenceStartMs: Long? = null
                 var lastRms: Double
 
+                // Reused across iterations (was allocated ~86x/second for hours).
+                val buffer = ByteArray(4096)
                 var badReads = 0
                 while (isRecording) {
-                    val buffer = ByteArray(4096)
                     val read = recorder.read(buffer, 0, buffer.size)
                     when {
                         read > 0 -> badReads = 0
@@ -284,7 +294,7 @@ class MeetingRecordService : Service() {
 
                     val now = android.os.SystemClock.elapsedRealtime()
 
-                    if (now - lastNotifUpdate > 1000) {
+                    if (now - lastNotifUpdate > 5000) {
                         lastNotifUpdate = now
                         val elapsed = (now - startTimeMs) / 1000
                         val min = elapsed / 60
@@ -292,6 +302,18 @@ class MeetingRecordService : Service() {
                         val status = String.format("%02d:%02d | %s", min, sec, TranscriptionQueue.status())
                         val nm = getSystemService(NotificationManager::class.java)
                         nm.notify(NOTIFICATION_ID, buildNotification(status))
+                    }
+
+                    // Long recordings: fail gracefully instead of letting the
+                    // system kill us when storage runs out.
+                    if (now - lastSpaceCheck > 10_000) {
+                        lastSpaceCheck = now
+                        val free = freeBytes(docsDir)
+                        if (free < LOW_STORAGE_BYTES) {
+                            Log.w(TAG, "Low storage ($free bytes) - stopping meeting")
+                            uiStatus = "Stopped - storage full"
+                            isRecording = false
+                        }
                     }
 
                     val chunkElapsed = now - chunkStartTime
@@ -570,25 +592,23 @@ class MeetingRecordService : Service() {
         super.onDestroy()
     }
 
-    private fun hasEnoughStorage(
-        destinationDir: File,
-        requiredBytes: Long
-    ): Boolean {
+    private fun freeBytes(destinationDir: File): Long {
         return try {
             if (!destinationDir.exists()) {
                 destinationDir.mkdirs()
             }
-
-            val stat = android.os.StatFs(destinationDir.absolutePath)
-            stat.availableBytes >= requiredBytes
+            android.os.StatFs(destinationDir.absolutePath).availableBytes
         } catch (e: Exception) {
-            AppLog.w(
-                "MeetingService",
-                "Storage check failed: ${e.message}"
-            )
-            false
+            AppLog.w("MeetingService", "Storage check failed: ${e.message}")
+            // Unknown -> don't block the user's meeting.
+            Long.MAX_VALUE
         }
     }
+
+    private fun hasEnoughStorage(
+        destinationDir: File,
+        requiredBytes: Long
+    ): Boolean = freeBytes(destinationDir) >= requiredBytes
 
 
 

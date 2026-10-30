@@ -20,6 +20,17 @@ class WhisperApp : Application() {
         }
     }
 
+    private val trimUnloadGuard = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun onCreate() {
+        super.onCreate()
+        // Previously nothing set holder or installed the crash handler: the whole
+        // installGlobalCrashCapture() path was dead code, so dashboard_crash.txt
+        // was never written.
+        holder = applicationContext
+        installGlobalCrashCapture()
+    }
+
     private fun installGlobalCrashCapture() {
         val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
@@ -38,10 +49,17 @@ class WhisperApp : Application() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= TRIM_MEMORY_MODERATE) {
-            Thread {
-                try { SttEngines.unloadIdle() } catch (_: Exception) {}
-            }.apply { isDaemon = true; name = "trim-unload"; start() }
-        }
+        if (level < TRIM_MEMORY_MODERATE) return
+        // Android calls this repeatedly under pressure; without the guard each
+        // call spawned another thread that raced SttEngines.unloadIdle().
+        if (!trimUnloadGuard.compareAndSet(false, true)) return
+        Thread {
+            try {
+                SttEngines.unloadIdle()
+            } catch (_: Exception) {
+            } finally {
+                trimUnloadGuard.set(false)
+            }
+        }.apply { isDaemon = true; name = "trim-unload"; start() }
     }
 }

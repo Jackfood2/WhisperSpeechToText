@@ -12,8 +12,8 @@ android {
         applicationId "com.whisperkeyboard"
         minSdk 26
         targetSdk 34
-        versionCode 70
-        versionName "2.7.10"
+        versionCode 71
+        versionName "2.9.2"
 
         ndk {
             // arm64-only is intentional: 32-bit/x86 builds would bloat the
@@ -125,11 +125,9 @@ android {
         }
     }
 
-    packaging {
-        jniLibs {
-            useLegacyPackaging true
-        }
-    }
+    // Native libs are shipped uncompressed and 16 KB page aligned (NDK 28 +
+    // -Wl,-z,max-page-size=16384). useLegacyPackaging extracted them at install
+    // time, defeating that and slowing cold start.
 
     lint {
         abortOnError true

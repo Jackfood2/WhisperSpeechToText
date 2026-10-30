@@ -22,16 +22,29 @@ object AudioUtils {
 
     @Volatile private var sharedRec: AudioRecord? = null
     @Volatile private var sharedBt: Boolean? = null
+    @Volatile private var sharedHandedOut: Boolean = false
 
     fun createRecorder(context: Context? = null): AudioRecord = synchronized(this) {
         val useBt = context?.getSharedPreferences("whisper", Context.MODE_PRIVATE)?.getBoolean("bt_mic", false) == true
         sharedRec?.let { existing ->
-            if (existing.state == AudioRecord.STATE_INITIALIZED && sharedBt == useBt) return existing
+            if (existing.state == AudioRecord.STATE_INITIALIZED && sharedBt == useBt && !sharedHandedOut) {
+                return existing
+            }
+            // AudioRecord exposes no public flush(): a stopped-but-not-released
+            // instance replays whatever it buffered from the previous session.
+            // Build a fresh one per recording session instead of reusing it.
             try { existing.release() } catch (_: Exception) {}
             sharedRec = null
+            sharedBt = null
+            sharedHandedOut = false
         }
+        if (!useBt) stopBluetoothSco(context)
         val rec = buildRecorder(useBt, context)
-        if (rec.state == AudioRecord.STATE_INITIALIZED) { sharedRec = rec; sharedBt = useBt }
+        if (rec.state == AudioRecord.STATE_INITIALIZED) {
+            sharedRec = rec
+            sharedBt = useBt
+            sharedHandedOut = true
+        }
         rec
     }
 
@@ -39,6 +52,19 @@ object AudioUtils {
         sharedRec?.let { try { it.release() } catch (_: Exception) {} }
         sharedRec = null
         sharedBt = null
+        sharedHandedOut = false
+        // Leaving the SCO link up after recording is a measurable idle drain.
+        stopBluetoothSco(WhisperApp.holder)
+    }
+
+    private fun stopBluetoothSco(ctx: Context?) {
+        try {
+            val am = ctx?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+            if (am.isBluetoothScoOn) {
+                am.stopBluetoothSco()
+                am.isBluetoothScoOn = false
+            }
+        } catch (_: Exception) {}
     }
 
     private fun buildRecorder(useBt: Boolean, context: Context?): AudioRecord {
@@ -137,15 +163,16 @@ object AudioUtils {
     }
 
     fun pcmToWav(pcmFile: File, wavFile: File) {
-        val pcmData = pcmFile.readBytes()
-        val pcmSize = pcmData.size
+        // Stream, do not readBytes(): a 60 s chunk used to be copied into a fresh
+        // ~1.9 MB ByteArray on top of the buffer the caller already held.
+        val pcmSize = pcmFile.length().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         val totalSize = pcmSize + 36
         val sampleRate = SAMPLE_RATE
         val channels = 1
         val bitsPerSample = 16
         val byteRate = sampleRate * channels * bitsPerSample / 8
         val blockAlign = channels * bitsPerSample / 8
-        FileOutputStream(wavFile).use { fos ->
+        java.io.BufferedOutputStream(FileOutputStream(wavFile), 64 * 1024).use { fos ->
             fos.write("RIFF".toByteArray())
             fos.write(intToLittleEndian(totalSize))
             fos.write("WAVE".toByteArray())
@@ -159,7 +186,14 @@ object AudioUtils {
             fos.write(shortToLittleEndian(bitsPerSample.toShort()))
             fos.write("data".toByteArray())
             fos.write(intToLittleEndian(pcmSize))
-            fos.write(pcmData)
+            pcmFile.inputStream().use { input ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    fos.write(buf, 0, n)
+                }
+            }
         }
     }
 

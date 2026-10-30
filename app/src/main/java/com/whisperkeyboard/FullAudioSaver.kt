@@ -16,7 +16,10 @@ class FullAudioSaver(
     private val baseName: String
 ) {
     private val pcmTmp: File = File.createTempFile("${baseName}_full_", ".pcm", context.cacheDir)
-    private var out: FileOutputStream? = FileOutputStream(pcmTmp, true)
+    // Buffered: writing every 4 KB read straight to flash meant ~86 syscalls per
+    // second for the whole meeting. 256 KB batches that into a few per minute.
+    private var out: java.io.BufferedOutputStream? =
+        java.io.BufferedOutputStream(FileOutputStream(pcmTmp, true), 256 * 1024)
     private var bytesWritten = 0L
     private var closed = false
 
