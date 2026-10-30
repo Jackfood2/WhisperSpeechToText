@@ -13,6 +13,29 @@
 **Build APK file to share:**
 `Build → Build APK(s)` → `app/build/outputs/apk/debug/app-debug.apk` (copy to phone)
 
+### 16 KB page alignment (Android 15+ / API 35+)
+
+AGP 8.2 does not align uncompressed native libraries, so an APK straight out of
+Gradle fails `zipalign -c -P 16` and Android shows
+"This app isn't 16 KB-compatible". Align and re-sign every APK you install:
+
+```powershell
+# debug flavour (debug keystore)
+.\scripts\align_apk.ps1 -Apk app\build\outputs\apk\debug\app-debug.apk `
+    -Out app\build\outputs\apk\debug\app-debug-aligned.apk `
+    -Keystore "$env:USERPROFILE\.android\debug.keystore"
+
+# release flavour
+.\scripts\align_apk.ps1 -Apk app\build\outputs\apk\release\app-release.apk `
+    -Out app\build\outputs\apk\release\app-release-aligned.apk `
+    -Keystore ..\whisper-release.jks -StorePass <pass> `
+    -KeyAlias whisper -KeyPass <pass>
+```
+
+Upgrading to AGP 8.5+ removes the need for this step.
+Note: a `debuggable` build shows the compatibility dialog regardless of
+alignment, because the dialog is also triggered by the debuggable flag.
+
 ## Option B: No install — Cloud build via GitHub Actions
 
 1. Create empty GitHub repo `whisper-keyboard`
